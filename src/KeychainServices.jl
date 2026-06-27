@@ -144,8 +144,12 @@ function delete_item! end
     probe_data_protection_entitlement() -> Bool
 
 Returns `true` when the current process has the entitlements required to access
-the Data Protection keychain, `false` otherwise (i.e., when `SecItemCopyMatching`
-returns `errSecMissingEntitlement`).
+the Data Protection keychain, `false` otherwise.
+
+Reads the process's own code-signing entitlements via `SecTaskCreateFromSelf` /
+`SecTaskCopyValueForEntitlement` — no keychain operation is performed. Returns
+`true` if `keychain-access-groups` (non-empty) or `com.apple.application-identifier`
+is present in the process entitlements.
 """
 function probe_data_protection_entitlement end
 

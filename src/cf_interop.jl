@@ -274,42 +274,49 @@ end
 """
     probe_data_protection_entitlement() -> Bool
 
-Returns `true` when the current process has the entitlements required to write to
+Returns `true` when the current process has the entitlements required to access
 the Data Protection keychain, `false` otherwise.
 
-This is determined at runtime by issuing a `SecItemAdd` call (the same underlying
-API used by [`add_item!`](@ref)) with `kSecUseDataProtectionKeychain = true` against
-a service name guaranteed not to conflict. An `errSecSuccess` or `errSecDuplicateItem`
-response confirms that write access is available; `errSecMissingEntitlement` (-34018)
-confirms it is not. The probe item is deleted on success.
+This is determined by reading the process's own code-signing entitlements via
+`SecTaskCreateFromSelf` / `SecTaskCopyValueForEntitlement` — no keychain
+operation is performed. Per Apple's [Keychain Access Groups]
+(https://developer.apple.com/documentation/security/sharing-access-to-keychain-items-among-a-collection-of-apps)
+documentation, Data Protection keychain access requires at least one of:
+
+- `keychain-access-groups` — a non-empty CFArrayRef of access-group strings.
+- `com.apple.application-identifier` — present on sandboxed and properly
+  signed macOS apps.
 """
 function probe_data_protection_entitlement()::Bool
-    probe_service = "KeychainServices.jl.entitlement.probe.$(getpid()).$(time_ns())"
-
-    add_pairs = Pair{Symbol,Any}[
-        :kSecClass                    => :kSecClassGenericPassword,
-        :kSecAttrService              => probe_service,
-        :kSecAttrAccount              => "probe",
-        :kSecUseDataProtectionKeychain => true,
-        :kSecValueData                => UInt8[0x70],  # minimal CFData
-    ]
-
-    status = _cf_dict(add_pairs) do dict
-        @ccall SecItemAdd(dict::Ptr{Cvoid}, C_NULL::Ptr{Cvoid})::Int32
-    end
-
-    if status == errSecSuccess || status == errSecDuplicateItem
-        del_pairs = Pair{Symbol,Any}[
-            :kSecClass                    => :kSecClassGenericPassword,
-            :kSecAttrService              => probe_service,
-            :kSecAttrAccount              => "probe",
-            :kSecUseDataProtectionKeychain => true,
-        ]
-        _cf_dict(del_pairs) do dict
-            @ccall SecItemDelete(dict::Ptr{Cvoid})::Int32
+    task = @ccall SecTaskCreateFromSelf(C_NULL::Ptr{Cvoid})::Ptr{Cvoid}
+    task == C_NULL && return false
+    try
+        # keychain-access-groups is a CFArrayRef; check it is also non-empty.
+        # com.apple.application-identifier is a CFStringRef; presence is sufficient.
+        for (key, check_nonempty) in (
+                ("keychain-access-groups",          true),
+                ("com.apple.application-identifier", false),
+            )
+            cfkey = @ccall CFStringCreateWithCString(
+                C_NULL::Ptr{Cvoid}, key::Cstring, UInt32(4)::UInt32
+            )::Ptr{Cvoid}
+            cfkey == C_NULL && continue
+            value = @ccall SecTaskCopyValueForEntitlement(
+                task::Ptr{Cvoid}, cfkey::Ptr{Cvoid}, C_NULL::Ptr{Cvoid}
+            )::Ptr{Cvoid}
+            @ccall CFRelease(cfkey::Ptr{Cvoid})::Cvoid
+            value == C_NULL && continue
+            if check_nonempty
+                count = @ccall CFArrayGetCount(value::Ptr{Cvoid})::Int64
+                @ccall CFRelease(value::Ptr{Cvoid})::Cvoid
+                count > 0 && return true
+            else
+                @ccall CFRelease(value::Ptr{Cvoid})::Cvoid
+                return true
+            end
         end
-        return true
+        return false
+    finally
+        @ccall CFRelease(task::Ptr{Cvoid})::Cvoid
     end
-
-    return false
 end
