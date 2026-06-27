@@ -124,8 +124,10 @@ Find a keychain item by matching the non-`nothing` fields of `item`.
 - `return_data=true` — include the secret in the result's `secret` field.
 - `return_attributes=true` — populate the result `item` from the keychain metadata.
 - `secret_output` — an `IO` to write the secret bytes into. When `nothing` (the
-  default), a `Base.SecretBuffer` is created automatically and rewound to position 0
-  before being returned in `KeychainItemResult.secret`.
+  default), a `Base.SecretBuffer` is created automatically, seekstarted, and
+  returned in `KeychainItemResult.secret` ready to read. When you supply your own
+  `IO`, bytes are appended at its current position and the position is left there —
+  no seeking is performed, so non-seekable streams and append workflows both work.
 
 On the Data Protection keychain, `use_authentication_ui` (a `kSecUseAuthenticationUI*`
 symbol) and `use_operation_prompt` (a `String`) control how the system presents

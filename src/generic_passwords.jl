@@ -248,7 +248,7 @@ function copy_matching(
         result = _sec_item_copy_matching(query)
         try
             r = _parse_copy_matching_result(item, return_data, return_attributes, result, io)
-            r.secret !== nothing && seekstart(r.secret)
+            auto_created && r.secret !== nothing && seekstart(r.secret)
             return r
         finally
             result != C_NULL && @ccall CFRelease(result::Ptr{Cvoid})::Cvoid
