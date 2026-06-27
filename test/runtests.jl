@@ -140,6 +140,7 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
             add_item!(item, secret)
 
             r1 = copy_matching(item; return_data=true)
+            seekstart(secret)
             @test r1.secret == secret
 
             r2 = copy_matching(item; return_attributes=true)
@@ -150,6 +151,7 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
 
             update_item!(item, GenericPasswordItem(label="Updated label"); secret=rotated)
             r3 = copy_matching(item; return_data=true, return_attributes=true)
+            seekstart(rotated)
             @test r3.secret      == rotated
             @test r3.item.label  == "Updated label"
 
@@ -170,6 +172,7 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
             secret = secret_buf("sync-secret")
             add_item!(item, secret)
             r = copy_matching(item; return_data=true, return_attributes=true)
+            seekstart(secret)
             @test r.secret == secret
             @test r.item.synchronizable == false
 
@@ -196,7 +199,7 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
             secret = secret_buf("attr-secret")
             add_item!(item, secret)
             r = copy_matching(item; return_data=true, return_attributes=true)
-
+            seekstart(secret)
             @test r.secret          == secret
             @test r.item.service    == service
             @test r.item.label      == "Initial Label"
@@ -298,11 +301,13 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
                     add_item!(item, secret)
 
                     r1 = copy_matching(item; return_data=true, return_attributes=true)
+                    seekstart(secret)
                     @test r1.secret == secret
                     @test r1.item.service == service
 
                     update_item!(item, GenericPasswordItem(label="File KC label"); secret=rotated)
                     r2 = copy_matching(item; return_data=true, return_attributes=true)
+                    seekstart(rotated)
                     @test r2.secret     == rotated
                     @test r2.item.label == "File KC label"
 

@@ -176,17 +176,16 @@ end
 # ── Secret IO helper ───────────────────────────────────────────────────────────
 
 """
-    _with_secret_bytes(f, io::IO)
+    _with_secret_bytes(f, io::IO, nbytes=nothing)
 
-Read all bytes from `io` into a `Vector{UInt8}`, call `f(bytes)`, then
-`securezero!` the vector regardless of whether `f` throws. The original `io`
-is not modified — callers retain ownership and responsibility for its lifetime.
+Read bytes from `io` at its current position — `nbytes` bytes if specified,
+otherwise all remaining — into a `Vector{UInt8}`, call `f(bytes)`, then
+`securezero!` the vector regardless of whether `f` throws. The `io` is not
+rewound or modified beyond the normal read advance; callers retain full
+ownership.
 """
-function _with_secret_bytes(f, io::IO)
-    pos = position(io)
-    seekstart(io)
-    bytes = read(io)
-    seek(io, pos)
+function _with_secret_bytes(f, io::IO, nbytes::Union{Int, Nothing} = nothing)
+    bytes = nbytes === nothing ? read(io) : read(io, nbytes)
     try
         f(bytes)
     finally
