@@ -102,11 +102,13 @@ include("generic_passwords.jl")
 # ── Public API stubs (for documentation and non-Apple dispatch) ────────────────
 
 """
-    add_item!(item::AbstractKeychainItem, secret::Base.SecretBuffer)
+    add_item!(item::AbstractKeychainItem, secret::IO)
 
-Store a new keychain item. `secret` is the password data; it must be a
-`Base.SecretBuffer` so that callers retain explicit control over when the bytes
-are shredded from memory.
+Store a new keychain item. `secret` is the password data as any `IO` object
+(e.g. `Base.SecretBuffer`, `IOBuffer`). Bytes are read internally into a
+`Vector{UInt8}`, used for the keychain write, then zeroed. The `secret` object
+itself is not modified — callers retain ownership and responsibility for its
+lifetime.
 """
 function add_item! end
 
@@ -126,10 +128,11 @@ authentication UI.
 function copy_matching end
 
 """
-    update_item!(query::AbstractKeychainItem, attributes::AbstractKeychainItem; secret=nothing)
+    update_item!(query::AbstractKeychainItem, attributes::AbstractKeychainItem; secret::Union{Nothing,IO}=nothing)
 
 Update an existing keychain item. `query` selects the item; non-`nothing` fields of
-`attributes` are applied as changes. Pass `secret` to rotate the password.
+`attributes` are applied as changes. Pass `secret` (any `IO` object) to rotate the
+password — bytes are extracted, used, and zeroed internally.
 """
 function update_item! end
 

@@ -109,20 +109,6 @@ function _cf_dict_set!(dict::Ptr{Cvoid}, key::Symbol, value::AbstractVector{UInt
     end
 end
 
-function _cf_dict_set!(dict::Ptr{Cvoid}, key::Symbol, value::Base.SecretBuffer)
-    pos = position(value)
-    bytes = try
-        seekstart(value)
-        read(value)
-    finally
-        seek(value, pos)
-    end
-    try
-        _cf_dict_set!(dict, key, bytes)
-    finally
-        Base.securezero!(bytes)
-    end
-end
 
 # Marshal an AccessControlItem into a SecAccessControlRef.
 function _cf_dict_set!(dict::Ptr{Cvoid}, key::Symbol, value::AccessControlItem)
@@ -184,6 +170,27 @@ function _cf_dict_set!(dict::Ptr{Cvoid}, ::Symbol, value::FileKeychain)
         end
     finally
         @ccall CFRelease(kc::Ptr{Cvoid})::Cvoid
+    end
+end
+
+# ── Secret IO helper ───────────────────────────────────────────────────────────
+
+"""
+    _with_secret_bytes(f, io::IO)
+
+Read all bytes from `io` into a `Vector{UInt8}`, call `f(bytes)`, then
+`securezero!` the vector regardless of whether `f` throws. The original `io`
+is not modified — callers retain ownership and responsibility for its lifetime.
+"""
+function _with_secret_bytes(f, io::IO)
+    pos = position(io)
+    seekstart(io)
+    bytes = read(io)
+    seek(io, pos)
+    try
+        f(bytes)
+    finally
+        Base.securezero!(bytes)
     end
 end
 

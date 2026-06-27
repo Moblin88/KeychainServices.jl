@@ -211,8 +211,10 @@ function _parse_copy_matching_result(
     return KeychainItemResult(item=query_item)
 end
 
-function add_item!(item::GenericPasswordItem, secret::Base.SecretBuffer)
-    _sec_item_add([pairs(item)..., :kSecValueData => secret])
+function add_item!(item::GenericPasswordItem, secret::IO)
+    _with_secret_bytes(secret) do bytes
+        _sec_item_add([pairs(item)..., :kSecValueData => bytes])
+    end
     return nothing
 end
 
@@ -246,11 +248,16 @@ end
 function update_item!(
     query::GenericPasswordItem,
     attributes::GenericPasswordItem;
-    secret::Union{Nothing, Base.SecretBuffer} = nothing,
+    secret::Union{Nothing, IO} = nothing,
 )
     update = _update_pairs(attributes)
-    secret !== nothing && push!(update, :kSecValueData => secret)
-    _sec_item_update(pairs(query), update)
+    if secret !== nothing
+        _with_secret_bytes(secret) do bytes
+            _sec_item_update(pairs(query), [update..., :kSecValueData => bytes])
+        end
+    else
+        _sec_item_update(pairs(query), update)
+    end
     return nothing
 end
 
