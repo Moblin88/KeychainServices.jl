@@ -119,9 +119,17 @@ of `item`.
   position is left after the write — no seeking is performed, so non-seekable
   streams and append workflows both work.
 
-On the Data Protection keychain, `use_authentication_ui` (a `kSecUseAuthenticationUI*`
-symbol) and `use_operation_prompt` (a `String`) control how the system presents
-authentication UI.
+`use_authentication_ui` controls whether the system may present UI for items
+protected by an [`AccessControlItem`](@ref) (biometry, device passphrase):
+
+| Value | Behaviour |
+|:------|:----------|
+| `:kSecUseAuthenticationUIAllow` | *(default)* Present authentication UI as needed |
+| `:kSecUseAuthenticationUIFail`  | Never show UI; return `KeychainPermissionError` instead |
+| `:kSecUseAuthenticationUISkip`  | Skip items that would require UI rather than failing |
+
+`use_operation_prompt` is a `String` shown to the user in the authentication
+dialog (e.g. `"Unlock your API key"`).
 
 Throws [`KeychainItemNotFoundError`](@ref) if no item matches.
 """
