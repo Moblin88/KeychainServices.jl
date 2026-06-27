@@ -234,8 +234,6 @@ function copy_matching(
             throw(KeychainOperationError("Unsupported kSecUseAuthenticationUI value: $use_authentication_ui"))
     end
 
-    # When return_data=true and no secret_output was supplied, auto-create a
-    # SecretBuffer and seekstart it before returning so callers can read immediately.
     auto_created = return_data && secret_output === nothing
     io = auto_created ? Base.SecretBuffer() : secret_output
 
@@ -250,7 +248,7 @@ function copy_matching(
         result = _sec_item_copy_matching(query)
         try
             r = _parse_copy_matching_result(item, return_data, return_attributes, result, io)
-            auto_created && r.secret !== nothing && seekstart(r.secret)
+            r.secret !== nothing && seekstart(r.secret)
             return r
         finally
             result != C_NULL && @ccall CFRelease(result::Ptr{Cvoid})::Cvoid
