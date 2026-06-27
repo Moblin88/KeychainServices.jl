@@ -148,17 +148,40 @@ function _cf_dict_set!(dict::Ptr{Cvoid}, key::Symbol, value::AccessControlItem)
     end
 end
 
-# Open a legacy keychain file and store the SecKeychainRef in the dict.
-function _cf_dict_set!(dict::Ptr{Cvoid}, key::Symbol, value::FileKeychain)
+# Open a legacy keychain file and set both the keys the Security framework needs:
+#   kSecUseKeychain     — tells SecItemAdd which keychain to store into
+#   kSecMatchSearchList — tells SecItemCopyMatching/Update/Delete which keychains to search
+# Both are set from one SecKeychainOpen call; having both keys in the dict is harmless
+# (each SecItem operation uses only the key it cares about).
+function _cf_dict_set!(dict::Ptr{Cvoid}, ::Symbol, value::FileKeychain)
     kc_ref = Ref{Ptr{Cvoid}}(C_NULL)
     status = @ccall SecKeychainOpen(value.path::Cstring, kc_ref::Ref{Ptr{Cvoid}})::Int32
     status != 0 && throw(KeychainOperationError(
         "SecKeychainOpen(\"$(value.path)\") failed with OSStatus $status"
     ))
     kc = kc_ref[]
-    kc == C_NULL && throw(KeychainOperationError("SecKeychainOpen returned a NULL ref for \"$(value.path)\""))
+    kc == C_NULL && throw(KeychainOperationError(
+        "SecKeychainOpen returned a NULL ref for \"$(value.path)\""
+    ))
     try
-        @ccall CFDictionarySetValue(dict::Ptr{Cvoid}, _sec(key)::Ptr{Cvoid}, kc::Ptr{Cvoid})::Cvoid
+        # kSecUseKeychain: for SecItemAdd
+        @ccall CFDictionarySetValue(
+            dict::Ptr{Cvoid}, _sec(:kSecUseKeychain)::Ptr{Cvoid}, kc::Ptr{Cvoid}
+        )::Cvoid
+
+        # kSecMatchSearchList: for SecItemCopyMatching / SecItemUpdate / SecItemDelete
+        cb  = cglobal(:kCFTypeArrayCallBacks, Cvoid)
+        arr = GC.@preserve kc @ccall CFArrayCreate(
+            C_NULL::Ptr{Cvoid}, Ref(kc)::Ptr{Ptr{Cvoid}}, Int64(1)::Int64, cb::Ptr{Cvoid}
+        )::Ptr{Cvoid}
+        arr == C_NULL && throw(KeychainOperationError("CFArrayCreate returned NULL"))
+        try
+            @ccall CFDictionarySetValue(
+                dict::Ptr{Cvoid}, _sec(:kSecMatchSearchList)::Ptr{Cvoid}, arr::Ptr{Cvoid}
+            )::Cvoid
+        finally
+            @ccall CFRelease(arr::Ptr{Cvoid})::Cvoid
+        end
     finally
         @ccall CFRelease(kc::Ptr{Cvoid})::Cvoid
     end

@@ -283,6 +283,42 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
             @test_throws KeychainOperationError copy_matching(item; return_attributes=true)
         end
 
+        @testset "File keychain — basic CRUD" begin
+            mktempdir() do dir
+                kc_path = joinpath(dir, "test.keychain-db")
+                run(`security create-keychain -p test-kc-pass $kc_path`)
+                try
+                    service = "KeychainServices.jl.filekc.$(getpid())"
+                    item    = GenericPasswordItem(service=service, account="user",
+                                                  keychain=FileKeychain(kc_path))
+
+                    secret  = secret_buf("file-kc-secret")
+                    rotated = secret_buf("file-kc-secret-rotated")
+
+                    add_item!(item, secret)
+
+                    r1 = copy_matching(item; return_data=true, return_attributes=true)
+                    @test r1.secret == secret
+                    @test r1.item.service == service
+
+                    update_item!(item, GenericPasswordItem(label="File KC label"); secret=rotated)
+                    r2 = copy_matching(item; return_data=true, return_attributes=true)
+                    @test r2.secret     == rotated
+                    @test r2.item.label == "File KC label"
+
+                    delete_item!(item)
+                    @test_throws KeychainItemNotFoundError copy_matching(item; return_data=true)
+
+                    Base.shred!(secret); Base.shred!(rotated)
+                    r1.secret !== nothing && Base.shred!(r1.secret)
+                    r2.secret !== nothing && Base.shred!(r2.secret)
+                finally
+                    # deregister from securityd before the temp dir is removed
+                    run(`security delete-keychain $kc_path`)
+                end
+            end
+        end
+
     end # @static if Sys.isapple()
 
 end # @testset "KeychainServices.jl"
