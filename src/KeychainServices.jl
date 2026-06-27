@@ -5,6 +5,7 @@ using Dates
 export AbstractKeychainItem,
        keychain_target,
        GenericPasswordItem,
+       InternetPasswordItem,
        KeychainTarget,
        DataProtectionKeychain,
        LoginKeychain,
@@ -97,6 +98,7 @@ Base.showerror(io::IO, e::KeychainPermissionError)   = print(io, e.message)
 include("keychain_targets.jl")
 include("access_control.jl")
 include("generic_passwords.jl")
+include("internet_passwords.jl")
 
 # ── Public API stubs (for documentation and non-Apple dispatch) ────────────────
 

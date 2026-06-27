@@ -5,6 +5,7 @@
 ```@docs
 AbstractKeychainItem
 GenericPasswordItem
+InternetPasswordItem
 ```
 
 ## Keychain targets
@@ -32,6 +33,7 @@ copy_secret
 update_item!
 delete_item!
 Base.pairs(::KeychainServices.GenericPasswordItem)
+Base.pairs(::KeychainServices.InternetPasswordItem)
 ```
 
 ## Entitlement probe

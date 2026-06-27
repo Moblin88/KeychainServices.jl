@@ -29,8 +29,12 @@ The legacy keychain is the original macOS keychain, managed by
 subsystem.
 
 ```julia
-# Default — user's login keychain
+# Default — user's login keychain (generic password)
 item = GenericPasswordItem(service="com.example.app", account="alice")
+add_item!(item, secret)
+
+# Default — user's login keychain (internet password)
+item = InternetPasswordItem(server="api.example.com", account="alice")
 add_item!(item, secret)
 
 # Explicit file keychain
@@ -93,7 +97,11 @@ else
 end
 ```
 
+The same pattern applies to [`InternetPasswordItem`](@ref).
+
 ## Summary
+
+All item classes ([`GenericPasswordItem`](@ref), [`InternetPasswordItem`](@ref)) support all three keychain targets.
 
 | | `LoginKeychain()` | `DataProtectionKeychain()` | `FileKeychain(path)` |
 |:--|:--|:--|:--|
@@ -132,6 +140,14 @@ function store_credential(service, account, password)
     secret = Base.SecretBuffer(password)
     item   = GenericPasswordItem(service=service, account=account,
                                  keychain=DataProtectionKeychain())
+    add_item!(item, secret)
+    Base.shred!(secret)
+end
+
+function store_internet_credential(server, account, password)
+    secret = Base.SecretBuffer(password)
+    item   = InternetPasswordItem(server=server, account=account,
+                                  keychain=DataProtectionKeychain())
     add_item!(item, secret)
     Base.shred!(secret)
 end

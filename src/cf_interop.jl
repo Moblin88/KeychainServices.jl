@@ -107,6 +107,19 @@ function _julia_to_cf(f, value::AbstractVector{UInt8})
     end
 end
 
+function _julia_to_cf(f, value::Integer)
+    v = Int32(value)
+    cfnum = GC.@preserve v @ccall CFNumberCreate(
+        C_NULL::Ptr{Cvoid}, Int32(3)::Int32, Ref(v)::Ptr{Int32}
+    )::Ptr{Cvoid}
+    cfnum == C_NULL && throw(KeychainOperationError("CFNumberCreate returned NULL"))
+    try
+        f(cfnum)
+    finally
+        @ccall CFRelease(cfnum::Ptr{Cvoid})::Cvoid
+    end
+end
+
 function _julia_to_cf(f, value::AccessControlItem)
     error_ref = Ref{Ptr{Cvoid}}(C_NULL)
     acc_ref   = @ccall SecAccessControlCreateWithFlags(
@@ -322,6 +335,12 @@ function _cf_to_julia(p::Ptr{Cvoid}, ::Type{Vector{UInt8}})
         len > 0 && unsafe_copyto!(pointer(out), Ptr{UInt8}(bytes_ptr), Int(len))
     end
     return out
+end
+
+function _cf_to_julia(p::Ptr{Cvoid}, ::Type{Int})
+    v = Ref{Int32}(0)
+    @ccall CFNumberGetValue(p::Ptr{Cvoid}, Int32(3)::Int32, v::Ref{Int32})::Bool
+    return Int(v[])
 end
 
 # Symbol reverse-lookup requires the valid-constants set since CF doesn't self-describe identity.

@@ -7,7 +7,12 @@
 
 KeychainServices.jl is a native Julia wrapper over Apple's [Keychain Services](https://developer.apple.com/documentation/security/keychain-services) API.
 
-It calls Security.framework directly through Julia's `@ccall` bindings — no shell-outs, no helper binaries. Supported item class: `kSecClassGenericPassword` (generic passwords).
+It calls Security.framework directly through Julia's `@ccall` bindings — no shell-outs, no helper binaries.
+
+Supported item classes:
+
+- `kSecClassGenericPassword` — generic passwords ([`GenericPasswordItem`](@ref))
+- `kSecClassInternetPassword` — internet / URL-keyed passwords ([`InternetPasswordItem`](@ref))
 
 ## Platform
 
@@ -15,6 +20,8 @@ It calls Security.framework directly through Julia's `@ccall` bindings — no sh
 - **Other platforms**: the module loads and exports all types, but operations raise [`UnsupportedPlatformError`](@ref).
 
 ## Quick start
+
+### Generic passwords
 
 ```julia
 using KeychainServices
@@ -38,9 +45,34 @@ Base.shred!(rotated)
 Base.shred!(password)
 ```
 
+### Internet passwords
+
+```julia
+using KeychainServices
+
+secret = Base.SecretBuffer("s3cr3t")
+item   = InternetPasswordItem(
+    server   = "api.example.com",
+    account  = "alice",
+    protocol = :kSecAttrProtocolHTTPS,
+    port     = 443,
+)
+
+add_item!(item, secret)
+
+password = copy_secret(item)         # Base.SecretBuffer, seekstarted and ready to read
+results  = search_items(item)        # Vector{InternetPasswordItem} with all metadata
+
+update_item!(item, InternetPasswordItem(label="Primary API key"))
+delete_item!(item)
+
+Base.shred!(secret)
+Base.shred!(password)
+```
+
 ## Keychain targets
 
-The `keychain` field of [`GenericPasswordItem`](@ref) controls which keychain backend is used:
+The `keychain` field of [`GenericPasswordItem`](@ref) and [`InternetPasswordItem`](@ref) controls which keychain backend is used:
 
 | Type | Behaviour |
 |:-----|:----------|
@@ -61,9 +93,9 @@ The `keychain` field of [`GenericPasswordItem`](@ref) controls which keychain ba
 item = GenericPasswordItem(service="com.example.app", account="alice",
                            keychain=LoginKeychain())
 
-# Specific keychain file
-item = GenericPasswordItem(service="com.example.app", account="alice",
-                           keychain=FileKeychain("/path/to/my.keychain"))
+# Internet password on a specific keychain file
+item = InternetPasswordItem(server="api.example.com", account="alice",
+                            keychain=FileKeychain("/path/to/my.keychain"))
 ```
 
 ## Access control (Data Protection keychain)
@@ -95,12 +127,13 @@ method dispatch:
 | `Symbol` | CF constant (via `cglobal`) |
 | `AbstractString` | `CFStringRef` |
 | `Bool` | `kCFBooleanTrue` / `kCFBooleanFalse` |
+| `Integer` | `CFNumberRef` (used for `kSecAttrPort`) |
 | `AbstractVector{UInt8}` | `CFDataRef` |
 | `Base.SecretBuffer` | `CFDataRef` (bytes zeroed after use) |
 | [`AccessControlItem`](@ref) | `SecAccessControlRef` |
 | [`FileKeychain`](@ref) | `SecKeychainRef` (via `SecKeychainOpen`) |
 
-[`GenericPasswordItem`](@ref) implements `Base.pairs` to expose its Security.framework
+[`GenericPasswordItem`](@ref) and [`InternetPasswordItem`](@ref) implement `Base.pairs` to expose their Security.framework
 key-value pairs, making the top-level CRUD functions thin wrappers:
 
 ```julia
