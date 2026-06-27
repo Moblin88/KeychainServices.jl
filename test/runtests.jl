@@ -6,12 +6,6 @@ using Test
 
 secret_buf(s::String) = Base.SecretBuffer(s)
 
-# Use the Security C API directly to probe whether the current process holds the
-# entitlements required for Data Protection keychain access.
-# `SecItemCopyMatching` with `kSecUseDataProtectionKeychain=true` returns
-# `errSecMissingEntitlement` (-34018) when the entitlement is absent; an
-# `errSecItemNotFound` response confirms that the query reached the keychain
-# subsystem successfully.
 data_protection_available() = @static Sys.isapple() ? probe_data_protection_entitlement() : false
 
 # ── Platform / type tests (no entitlement required) ───────────────────────────
@@ -21,13 +15,15 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
     @testset "Platform support" begin
         if Sys.isapple()
             @test add_item!    isa Function
-            @test copy_matching isa Function
+            @test search_items isa Function
+            @test copy_secret  isa Function
             @test update_item! isa Function
             @test delete_item! isa Function
         else
             item = GenericPasswordItem(service="svc", account="acct")
             @test_throws UnsupportedPlatformError add_item!(item, secret_buf("x"))
-            @test_throws UnsupportedPlatformError copy_matching(item)
+            @test_throws UnsupportedPlatformError search_items(item)
+            @test_throws UnsupportedPlatformError copy_secret(item)
             @test_throws UnsupportedPlatformError delete_item!(item)
         end
     end
@@ -42,10 +38,12 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
 
     @testset "GenericPasswordItem defaults" begin
         item = GenericPasswordItem(service="svc", account="acct")
-        @test item.service  == "svc"
-        @test item.account  == "acct"
-        @test item.label    === nothing
-        @test item.keychain isa LoginKeychain
+        @test item.service     == "svc"
+        @test item.account     == "acct"
+        @test item.label       === nothing
+        @test item.keychain    isa LoginKeychain
+        @test item.created_at  === nothing
+        @test item.updated_at  === nothing
     end
 
     @testset "Secret inputs — accepted types" begin
@@ -71,12 +69,20 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
     @testset "pairs protocol — LoginKeychain (default)" begin
         item  = GenericPasswordItem(service="svc", account="acct", label="lbl")
         attrs = Dict(pairs(item))
-        @test attrs[:kSecClass]    == :kSecClassGenericPassword
+        @test attrs[:kSecClass]       == :kSecClassGenericPassword
         @test attrs[:kSecAttrService] == "svc"
         @test attrs[:kSecAttrAccount] == "acct"
         @test attrs[:kSecAttrLabel]   == "lbl"
         @test !haskey(attrs, :kSecUseDataProtectionKeychain)
         @test !haskey(attrs, :kSecUseKeychain)
+    end
+
+    @testset "pairs protocol — timestamps not included in query dict" begin
+        item  = GenericPasswordItem(service="svc", account="acct",
+                                    created_at=DateTime(2024,1,1), updated_at=DateTime(2024,1,2))
+        attrs = Dict(pairs(item))
+        @test !haskey(attrs, :kSecAttrCreationDate)
+        @test !haskey(attrs, :kSecAttrModificationDate)
     end
 
     @testset "pairs protocol — DataProtectionKeychain" begin
@@ -124,7 +130,6 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
 
         has_dp = data_protection_available()
 
-        # Basic CRUD runs against the login keychain (default), so no entitlement needed.
         @testset "Login keychain — basic CRUD" begin
             service = "KeychainServices.jl.tests.$(getpid())"
             account = "integration-user"
@@ -137,28 +142,34 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
 
             add_item!(item, secret)
 
-            r1 = copy_matching(item; return_data=true)
+            s = copy_secret(item)
             seekstart(secret)
-            @test r1.secret == secret
+            @test s == secret
+            Base.shred!(s)
 
-            r2 = copy_matching(item; return_attributes=true)
-            @test r2.item.service == service
-            @test r2.item.account == account
-            @test r2.created_at === nothing || r2.created_at isa DateTime
-            @test r2.updated_at === nothing || r2.updated_at isa DateTime
+            results = search_items(item)
+            @test length(results) == 1
+            r = results[1]
+            @test r.service    == service
+            @test r.account    == account
+            @test r.created_at === nothing || r.created_at isa DateTime
+            @test r.updated_at === nothing || r.updated_at isa DateTime
 
             update_item!(item, GenericPasswordItem(label="Updated label"); secret=rotated)
-            r3 = copy_matching(item; return_data=true, return_attributes=true)
+
+            s3 = copy_secret(item)
             seekstart(rotated)
-            @test r3.secret      == rotated
-            @test r3.item.label  == "Updated label"
+            @test s3 == rotated
+            Base.shred!(s3)
+
+            results3 = search_items(item)
+            @test results3[1].label == "Updated label"
 
             delete_item!(item)
-            @test_throws KeychainItemNotFoundError copy_matching(item; return_data=true)
+            @test_throws KeychainItemNotFoundError copy_secret(item)
+            @test search_items(item) == GenericPasswordItem[]
 
             Base.shred!(secret); Base.shred!(rotated)
-            r1.secret !== nothing && Base.shred!(r1.secret)
-            r3.secret !== nothing && Base.shred!(r3.secret)
         end
 
         @testset "Login keychain — tri-state synchronizable" begin
@@ -169,14 +180,17 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
 
             secret = secret_buf("sync-secret")
             add_item!(item, secret)
-            r = copy_matching(item; return_data=true, return_attributes=true)
+
+            s = copy_secret(item)
             seekstart(secret)
-            @test r.secret == secret
-            @test r.item.synchronizable == false
+            @test s == secret
+            Base.shred!(s)
+
+            results = search_items(item)
+            @test results[1].synchronizable == false
 
             delete_item!(item)
             Base.shred!(secret)
-            r.secret !== nothing && Base.shred!(r.secret)
         end
 
         @testset "Login keychain — extended attributes" begin
@@ -196,23 +210,26 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
 
             secret = secret_buf("attr-secret")
             add_item!(item, secret)
-            r = copy_matching(item; return_data=true, return_attributes=true)
+
+            s = copy_secret(item)
             seekstart(secret)
-            @test r.secret          == secret
-            @test r.item.service    == service
-            @test r.item.label      == "Initial Label"
-            @test r.item.description === nothing || r.item.description == "Integration description"
-            @test r.item.comment     === nothing || r.item.comment     == "Integration comment"
-            @test r.item.is_invisible === nothing || r.item.is_invisible == false
-            @test r.item.is_negative  === nothing || r.item.is_negative  == false
-            @test r.item.generic_data === nothing || r.item.generic_data == collect(codeunits("metadata"))
+            @test s == secret
+            Base.shred!(s)
+
+            results = search_items(item)
+            r = results[1]
+            @test r.service     == service
+            @test r.label       == "Initial Label"
+            @test r.description === nothing || r.description == "Integration description"
+            @test r.comment     === nothing || r.comment     == "Integration comment"
+            @test r.is_invisible === nothing || r.is_invisible == false
+            @test r.is_negative  === nothing || r.is_negative  == false
+            @test r.generic_data === nothing || r.generic_data == collect(codeunits("metadata"))
 
             delete_item!(item)
             Base.shred!(secret)
-            r.secret !== nothing && Base.shred!(r.secret)
         end
 
-        # Data Protection keychain tests require the keychain-access-groups entitlement.
         @testset "Data Protection keychain — basic CRUD" begin
             service = "KeychainServices.jl.dp.tests.$(getpid())"
             item    = GenericPasswordItem(service=service, account="user",
@@ -224,21 +241,27 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
                 rotated = secret_buf("dp-secret-rotated")
 
                 add_item!(item, secret)
-                r = copy_matching(item; return_data=true, return_attributes=true)
+
+                s = copy_secret(item)
                 seekstart(secret)
-                @test r.secret == secret
-                @test r.item.service == service
+                @test s == secret
+                Base.shred!(s)
+
+                results = search_items(item)
+                @test results[1].service == service
 
                 update_item!(item, GenericPasswordItem(label="DP label"); secret=rotated)
-                r2 = copy_matching(item; return_data=true, return_attributes=true)
+
+                s2 = copy_secret(item)
                 seekstart(rotated)
-                @test r2.secret     == rotated
-                @test r2.item.label == "DP label"
+                @test s2 == rotated
+                Base.shred!(s2)
+
+                results2 = search_items(item)
+                @test results2[1].label == "DP label"
 
                 delete_item!(item)
                 Base.shred!(secret); Base.shred!(rotated)
-                r.secret  !== nothing && Base.shred!(r.secret)
-                r2.secret !== nothing && Base.shred!(r2.secret)
             else
                 @test_throws KeychainPermissionError add_item!(item, secret_buf("x"))
             end
@@ -260,16 +283,20 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
 
                 secret = secret_buf("dp-attr-secret")
                 add_item!(item, secret)
-                r = copy_matching(item; return_data=true, return_attributes=true)
 
-                @test r.secret         == secret
-                @test r.item.label     == "Initial Label"
-                @test r.item.accessible == :kSecAttrAccessibleWhenUnlocked
-                @test r.item.generic_data === nothing || r.item.generic_data == collect(codeunits("metadata"))
+                s = copy_secret(item)
+                seekstart(secret)
+                @test s == secret
+                Base.shred!(s)
+
+                results = search_items(item)
+                r = results[1]
+                @test r.label        == "Initial Label"
+                @test r.accessible   == :kSecAttrAccessibleWhenUnlocked
+                @test r.generic_data === nothing || r.generic_data == collect(codeunits("metadata"))
 
                 delete_item!(item)
                 Base.shred!(secret)
-                r.secret !== nothing && Base.shred!(r.secret)
             else
                 @test_throws KeychainPermissionError add_item!(item, secret_buf("x"))
             end
@@ -283,7 +310,7 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
                 accessible     = :kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
             )
             @test_throws KeychainOperationError add_item!(item, secret_buf("invalid"))
-            @test_throws KeychainOperationError copy_matching(item; return_attributes=true)
+            @test_throws KeychainOperationError search_items(item)
         end
 
         @testset "File keychain — basic CRUD" begin
@@ -300,25 +327,29 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
 
                     add_item!(item, secret)
 
-                    r1 = copy_matching(item; return_data=true, return_attributes=true)
+                    s = copy_secret(item)
                     seekstart(secret)
-                    @test r1.secret == secret
-                    @test r1.item.service == service
+                    @test s == secret
+                    Base.shred!(s)
+
+                    results = search_items(item)
+                    @test results[1].service == service
 
                     update_item!(item, GenericPasswordItem(label="File KC label"); secret=rotated)
-                    r2 = copy_matching(item; return_data=true, return_attributes=true)
+
+                    s2 = copy_secret(item)
                     seekstart(rotated)
-                    @test r2.secret     == rotated
-                    @test r2.item.label == "File KC label"
+                    @test s2 == rotated
+                    Base.shred!(s2)
+
+                    results2 = search_items(item)
+                    @test results2[1].label == "File KC label"
 
                     delete_item!(item)
-                    @test_throws KeychainItemNotFoundError copy_matching(item; return_data=true)
+                    @test_throws KeychainItemNotFoundError copy_secret(item)
 
                     Base.shred!(secret); Base.shred!(rotated)
-                    r1.secret !== nothing && Base.shred!(r1.secret)
-                    r2.secret !== nothing && Base.shred!(r2.secret)
                 finally
-                    # deregister from securityd before the temp dir is removed
                     run(`security delete-keychain $kc_path`)
                 end
             end

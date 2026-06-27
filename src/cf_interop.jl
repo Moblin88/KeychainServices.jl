@@ -233,6 +233,17 @@ function _sec_item_copy_matching(query_init)
     end
 end
 
+# Returns a CFArrayRef (caller must CFRelease), or C_NULL when no items match.
+function _sec_item_copy_all(query_init)
+    _cf_dict(query_init) do dict
+        result_ref = Ref{Ptr{Cvoid}}(C_NULL)
+        status = @ccall SecItemCopyMatching(dict::Ptr{Cvoid}, result_ref::Ref{Ptr{Cvoid}})::Int32
+        status == errSecItemNotFound && return C_NULL
+        status != errSecSuccess && throw(_classify_keychain_error(status))
+        return result_ref[]
+    end
+end
+
 function _sec_item_update(query_init, attrs_init)
     _cf_dict(query_init) do query
         _cf_dict(attrs_init) do attrs

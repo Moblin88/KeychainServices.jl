@@ -25,16 +25,17 @@ item    = GenericPasswordItem(service="com.example.app", account="alice")
 
 add_item!(item, secret)
 
-result = copy_matching(item; return_data=true, return_attributes=true)
-# result.secret  :: Base.SecretBuffer  (the password)
-# result.item    :: GenericPasswordItem (populated from keychain metadata)
+password = copy_secret(item)         # Base.SecretBuffer, seekstarted and ready to read
+results  = search_items(item)        # Vector{GenericPasswordItem} with all metadata
+label    = results[1].label
+created  = results[1].created_at
 
 update_item!(item, GenericPasswordItem(label="Primary login"); secret=rotated)
 delete_item!(item)
 
 Base.shred!(secret)
 Base.shred!(rotated)
-result.secret !== nothing && Base.shred!(result.secret)
+Base.shred!(password)
 ```
 
 ## Keychain targets

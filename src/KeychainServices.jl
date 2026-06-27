@@ -4,7 +4,6 @@ using Dates
 
 export AbstractKeychainItem,
        GenericPasswordItem,
-       KeychainItemResult,
        KeychainTarget,
        DataProtectionKeychain,
        LoginKeychain,
@@ -17,7 +16,8 @@ export AbstractKeychainItem,
        KeychainItemNotFoundError,
        KeychainPermissionError,
        add_item!,
-       copy_matching,
+       search_items,
+       copy_secret,
        update_item!,
        delete_item!,
        probe_data_protection_entitlement
@@ -32,24 +32,6 @@ Abstract supertype for all keychain items. Concrete subtypes implement
 Core Foundation dictionaries for use with the Security.framework SecItem API.
 """
 abstract type AbstractKeychainItem end
-
-"""
-    KeychainItemResult{T}
-
-Return value from [`copy_matching`](@ref). Carries the matched `item` (populated
-from keychain attributes when `return_attributes=true`), an optional `secret`
-(`IO` when `return_data=true`), and optional `created_at` / `updated_at` timestamps.
-
-When no `secret_output` is passed to `copy_matching`, `secret` is a
-`Base.SecretBuffer` seekstarted to position 0 and ready to read. When you supply
-your own `secret_output`, it is returned as-is with position left after the write.
-"""
-Base.@kwdef struct KeychainItemResult{T<:AbstractKeychainItem}
-    item::T
-    secret::Union{Nothing, IO}           = nothing
-    created_at::Union{Nothing, DateTime} = nothing
-    updated_at::Union{Nothing, DateTime} = nothing
-end
 
 # ── Error types ────────────────────────────────────────────────────────────────
 
@@ -78,7 +60,7 @@ struct UnsupportedPlatformError  <: KeychainServicesError; platform::Symbol; mes
 """
     KeychainItemNotFoundError(message)
 
-Thrown by [`copy_matching`](@ref) or [`delete_item!`](@ref) when no keychain
+Thrown by [`copy_secret`](@ref) or [`delete_item!`](@ref) when no keychain
 item matches the query.
 """
 struct KeychainItemNotFoundError <: KeychainServicesError; message::String; end
@@ -115,25 +97,35 @@ retain ownership.
 function add_item! end
 
 """
-    copy_matching(item::AbstractKeychainItem; return_data=true, return_attributes=false,
-                  secret_output::Union{Nothing,IO}=nothing,
-                  use_authentication_ui=nothing, use_operation_prompt=nothing) -> KeychainItemResult
+    search_items(query::AbstractKeychainItem) -> Vector
 
-Find a keychain item by matching the non-`nothing` fields of `item`.
+Search for all keychain items matching the non-`nothing` fields of `query`.
+Returns a `Vector` of fully-populated items including `created_at` and
+`updated_at` timestamps. Returns an empty vector when no items match.
+"""
+function search_items end
 
-- `return_data=true` — include the secret in the result's `secret` field.
-- `return_attributes=true` — populate the result `item` from the keychain metadata.
-- `secret_output` — an `IO` to write the secret bytes into. When `nothing` (the
-  default), a `Base.SecretBuffer` is created automatically, seekstarted, and
-  returned in `KeychainItemResult.secret` ready to read. When you supply your own
-  `IO`, bytes are appended at its current position and the position is left there —
-  no seeking is performed, so non-seekable streams and append workflows both work.
+"""
+    copy_secret(item::AbstractKeychainItem; into::Union{Nothing,IO}=nothing,
+                use_authentication_ui=nothing, use_operation_prompt=nothing) -> IO
+
+Fetch the secret for the keychain item identified by the non-`nothing` fields
+of `item`.
+
+- When `into` is `nothing` (the default), a `Base.SecretBuffer` is created
+  automatically, the secret bytes are written into it, it is seekstarted, and
+  returned ready to read.
+- When `into` is an `IO`, bytes are written at its current position and the
+  position is left after the write — no seeking is performed, so non-seekable
+  streams and append workflows both work.
 
 On the Data Protection keychain, `use_authentication_ui` (a `kSecUseAuthenticationUI*`
 symbol) and `use_operation_prompt` (a `String`) control how the system presents
 authentication UI.
+
+Throws [`KeychainItemNotFoundError`](@ref) if no item matches.
 """
-function copy_matching end
+function copy_secret end
 
 """
     update_item!(query::AbstractKeychainItem, attributes::AbstractKeychainItem; secret=nothing)
@@ -175,10 +167,11 @@ else
     ))
 
     add_item!(::AbstractKeychainItem, ::Union{IO, AbstractVector{UInt8}, AbstractString}) = _unsupported()
-    copy_matching(::AbstractKeychainItem; kwargs...)                   = _unsupported()
-    update_item!(::AbstractKeychainItem, ::AbstractKeychainItem; kwargs...) = _unsupported()
-    delete_item!(::AbstractKeychainItem)                               = _unsupported()
-    probe_data_protection_entitlement()                                = _unsupported()
+    search_items(::AbstractKeychainItem)                                                  = _unsupported()
+    copy_secret(::AbstractKeychainItem; kwargs...)                                        = _unsupported()
+    update_item!(::AbstractKeychainItem, ::AbstractKeychainItem; kwargs...)               = _unsupported()
+    delete_item!(::AbstractKeychainItem)                                                  = _unsupported()
+    probe_data_protection_entitlement()                                                   = _unsupported()
 end
 
 end # module

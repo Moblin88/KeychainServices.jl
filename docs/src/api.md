@@ -5,7 +5,6 @@
 ```@docs
 AbstractKeychainItem
 GenericPasswordItem
-KeychainItemResult
 ```
 
 ## Keychain targets
@@ -28,7 +27,8 @@ AccessControlFlags
 
 ```@docs
 add_item!
-copy_matching
+search_items
+copy_secret
 update_item!
 delete_item!
 Base.pairs(::KeychainServices.GenericPasswordItem)

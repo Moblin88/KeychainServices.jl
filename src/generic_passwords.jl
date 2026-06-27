@@ -17,11 +17,14 @@ const _AUTH_UI_VALUES = (
 """
     GenericPasswordItem(; service, account, label, synchronizable, accessible,
                           access_group, description, comment, is_invisible,
-                          is_negative, generic_data, access_control, keychain)
+                          is_negative, generic_data, access_control, keychain,
+                          created_at, updated_at)
 
 Julia representation of a `kSecClassGenericPassword` keychain item.
 
 Fields set to `nothing` are omitted from Security.framework query dictionaries.
+`created_at` and `updated_at` are populated by [`search_items`](@ref) and are
+ignored when the item is used as a query or mutation target.
 
 The `keychain` field controls the keychain backend:
 - [`LoginKeychain()`](@ref) *(default)* — user's login keychain (macOS system default)
@@ -77,6 +80,8 @@ Base.@kwdef struct GenericPasswordItem <: AbstractKeychainItem
     generic_data::Union{Nothing, Vector{UInt8}}  = nothing
     access_control::Union{Nothing, AccessControlItem} = nothing
     keychain::KeychainTarget                     = LoginKeychain()
+    created_at::Union{Nothing, DateTime}         = nothing
+    updated_at::Union{Nothing, DateTime}         = nothing
 end
 
 _is_this_device_only(accessible::Symbol) = endswith(String(accessible), "ThisDeviceOnly")
@@ -167,51 +172,25 @@ function _parse_generic_password_result(attrs::Ptr{Cvoid}, fallback::GenericPass
         p == C_NULL ? nothing : _cf_constant_to_symbol(p, syms)
     end
 
-    # Use fallback for fields not present in the result dict.
     coalesce(a, b) = a !== nothing ? a : b
 
-    item = GenericPasswordItem(
-        service        = coalesce(get_str(:kSecAttrService),                   fallback.service),
-        account        = coalesce(get_str(:kSecAttrAccount),                   fallback.account),
-        label          = coalesce(get_str(:kSecAttrLabel),                     fallback.label),
-        synchronizable = coalesce(get_bool(:kSecAttrSynchronizable),           fallback.synchronizable),
+    return GenericPasswordItem(
+        service        = coalesce(get_str(:kSecAttrService),                          fallback.service),
+        account        = coalesce(get_str(:kSecAttrAccount),                          fallback.account),
+        label          = coalesce(get_str(:kSecAttrLabel),                            fallback.label),
+        synchronizable = coalesce(get_bool(:kSecAttrSynchronizable),                  fallback.synchronizable),
         accessible     = coalesce(get_const(:kSecAttrAccessible, _ACCESSIBLE_VALUES), fallback.accessible),
-        access_group   = coalesce(get_str(:kSecAttrAccessGroup),               fallback.access_group),
-        description    = coalesce(get_str(:kSecAttrDescription),               fallback.description),
-        comment        = coalesce(get_str(:kSecAttrComment),                   fallback.comment),
-        is_invisible   = coalesce(get_bool(:kSecAttrIsInvisible),              fallback.is_invisible),
-        is_negative    = coalesce(get_bool(:kSecAttrIsNegative),               fallback.is_negative),
-        generic_data   = coalesce(get_bytes(:kSecAttrGeneric),                 fallback.generic_data),
+        access_group   = coalesce(get_str(:kSecAttrAccessGroup),                      fallback.access_group),
+        description    = coalesce(get_str(:kSecAttrDescription),                      fallback.description),
+        comment        = coalesce(get_str(:kSecAttrComment),                          fallback.comment),
+        is_invisible   = coalesce(get_bool(:kSecAttrIsInvisible),                     fallback.is_invisible),
+        is_negative    = coalesce(get_bool(:kSecAttrIsNegative),                      fallback.is_negative),
+        generic_data   = coalesce(get_bytes(:kSecAttrGeneric),                        fallback.generic_data),
         access_control = fallback.access_control,
         keychain       = fallback.keychain,
+        created_at     = get_date(:kSecAttrCreationDate),
+        updated_at     = get_date(:kSecAttrModificationDate),
     )
-
-    return item, get_date(:kSecAttrCreationDate), get_date(:kSecAttrModificationDate)
-end
-
-function _parse_copy_matching_result(
-    query_item::GenericPasswordItem,
-    return_data::Bool,
-    return_attributes::Bool,
-    result::Ptr{Cvoid},
-    secret_io::IO,
-)
-    if return_attributes
-        item, created_at, updated_at = _parse_generic_password_result(result, query_item)
-        secret = if return_data
-            data_ptr = _cf_dict_get(result, :kSecValueData)
-            data_ptr == C_NULL && throw(KeychainOperationError("kSecReturnData=true but no kSecValueData in result"))
-            _cfdata_write_io(data_ptr, secret_io)
-            secret_io
-        else
-            nothing
-        end
-        return KeychainItemResult(item=item, secret=secret, created_at=created_at, updated_at=updated_at)
-    elseif return_data
-        _cfdata_write_io(result, secret_io)
-        return KeychainItemResult(item=query_item, secret=secret_io)
-    end
-    return KeychainItemResult(item=query_item)
 end
 
 function add_item!(item::GenericPasswordItem, secret::Union{IO, AbstractVector{UInt8}, AbstractString})
@@ -221,12 +200,31 @@ function add_item!(item::GenericPasswordItem, secret::Union{IO, AbstractVector{U
     return nothing
 end
 
-function copy_matching(
+function search_items(query::GenericPasswordItem)
+    q = Pair{Symbol,Any}[pairs(query)...]
+    push!(q, :kSecReturnAttributes => true)
+    push!(q, :kSecMatchLimit       => :kSecMatchLimitAll)
+
+    arr = _sec_item_copy_all(q)
+    arr == C_NULL && return GenericPasswordItem[]
+    try
+        count = @ccall CFArrayGetCount(arr::Ptr{Cvoid})::Int64
+        return [
+            _parse_generic_password_result(
+                @ccall(CFArrayGetValueAtIndex(arr::Ptr{Cvoid}, Int64(i - 1)::Int64)::Ptr{Cvoid}),
+                query,
+            )
+            for i in 1:count
+        ]
+    finally
+        @ccall CFRelease(arr::Ptr{Cvoid})::Cvoid
+    end
+end
+
+function copy_secret(
     item::GenericPasswordItem;
-    return_data::Bool           = true,
-    return_attributes::Bool     = false,
-    secret_output::Union{Nothing, IO}            = nothing,
-    use_authentication_ui::Union{Nothing, Symbol}       = nothing,
+    into::Union{Nothing, IO}                             = nothing,
+    use_authentication_ui::Union{Nothing, Symbol}        = nothing,
     use_operation_prompt::Union{Nothing, AbstractString} = nothing,
 )
     if use_authentication_ui !== nothing
@@ -234,22 +232,19 @@ function copy_matching(
             throw(KeychainOperationError("Unsupported kSecUseAuthenticationUI value: $use_authentication_ui"))
     end
 
-    auto_created = return_data && secret_output === nothing
-    io = auto_created ? Base.SecretBuffer() : secret_output
+    auto_created = into === nothing
+    io = auto_created ? Base.SecretBuffer() : into
 
     query = Pair{Symbol,Any}[pairs(item)...]
-    push!(query, :kSecReturnData       => return_data)
-    push!(query, :kSecReturnAttributes => return_attributes)
-    push!(query, :kSecMatchLimit       => :kSecMatchLimitOne)
+    push!(query, :kSecReturnData  => true)
+    push!(query, :kSecMatchLimit  => :kSecMatchLimitOne)
     use_authentication_ui !== nothing && push!(query, :kSecUseAuthenticationUI => use_authentication_ui)
     use_operation_prompt  !== nothing && push!(query, :kSecUseOperationPrompt  => use_operation_prompt)
 
     try
         result = _sec_item_copy_matching(query)
         try
-            r = _parse_copy_matching_result(item, return_data, return_attributes, result, io)
-            auto_created && r.secret !== nothing && seekstart(r.secret)
-            return r
+            _cfdata_write_io(result, io)
         finally
             result != C_NULL && @ccall CFRelease(result::Ptr{Cvoid})::Cvoid
         end
@@ -257,6 +252,8 @@ function copy_matching(
         auto_created && Base.shred!(io)
         rethrow()
     end
+    auto_created && seekstart(io)
+    return io
 end
 
 function update_item!(

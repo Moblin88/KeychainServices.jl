@@ -29,32 +29,31 @@ Direct-item API (targets the login keychain by default — no entitlements requi
 ```julia
 using KeychainServices
 
-secret = Base.SecretBuffer("s3cr3t")
-rotated_secret = Base.SecretBuffer("n3w-s3cr3t")
-item = GenericPasswordItem(service="com.example.app", account="alice")
+secret  = Base.SecretBuffer("s3cr3t")
+rotated = Base.SecretBuffer("n3w-s3cr3t")
+item    = GenericPasswordItem(service="com.example.app", account="alice")
 
 add_item!(item, secret)
 
-result = copy_matching(item; return_data=true, return_attributes=true)
-password = result.secret  # Base.SecretBuffer, seekstarted and ready to read
-label = result.item.label
+password = copy_secret(item)   # Base.SecretBuffer, seekstarted and ready to read
+results  = search_items(item)  # Vector{GenericPasswordItem} with metadata + timestamps
+label    = results[1].label
 
-update_item!(item, GenericPasswordItem(label="Primary login"); secret=rotated_secret)
+update_item!(item, GenericPasswordItem(label="Primary login"); secret=rotated)
 
 delete_item!(item)
 
 Base.shred!(secret)
-Base.shred!(rotated_secret)
+Base.shred!(rotated)
 Base.shred!(password)
 ```
 
 Fields left as `nothing` are omitted from the underlying Security.framework query dictionary.
 
 Secrets may be passed as a `Base.SecretBuffer` (or any `IO`), an
-`AbstractVector{UInt8}`, or an `AbstractString`. `copy_matching` returns the
-secret as an `IO` object — a `Base.SecretBuffer` seekstarted to position 0 when
-no `secret_output` is supplied, or your own `IO` with position left after the
-write when you provide one.
+`AbstractVector{UInt8}`, or an `AbstractString`. `copy_secret` returns a
+`Base.SecretBuffer` (seekstarted, ready to read) by default, or writes into
+a caller-supplied `IO` via the `into` keyword.
 
 Optional field configuration:
 
@@ -70,9 +69,9 @@ sync_item = GenericPasswordItem(
 )
 
 add_item!(sync_item, secret)
-result = copy_matching(sync_item; return_data=true)
+password = copy_secret(sync_item)
 Base.shred!(secret)
-Base.shred!(result.secret)
+Base.shred!(password)
 ```
 
 Additional supported generic-password attributes:
