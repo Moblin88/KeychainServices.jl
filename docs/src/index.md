@@ -1,0 +1,99 @@
+# KeychainServices.jl
+
+[![Build Status](https://github.com/Moblin88/KeychainServices.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/Moblin88/KeychainServices.jl/actions/workflows/CI.yml)
+[![Coverage](https://codecov.io/gh/Moblin88/KeychainServices.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/Moblin88/KeychainServices.jl)
+[![Docs (stable)](https://img.shields.io/badge/docs-stable-blue.svg)](https://Moblin88.github.io/KeychainServices.jl/stable/)
+[![Docs (dev)](https://img.shields.io/badge/docs-dev-blue.svg)](https://Moblin88.github.io/KeychainServices.jl/dev/)
+
+KeychainServices.jl is a native Julia wrapper over Apple's [Keychain Services](https://developer.apple.com/documentation/security/keychain-services) API.
+
+It calls Security.framework directly through Julia's `@ccall` bindings — no shell-outs, no helper binaries. Supported item class: `kSecClassGenericPassword` (generic passwords).
+
+## Platform
+
+- **macOS**: fully supported.
+- **Other platforms**: the module loads and exports all types, but operations raise [`UnsupportedPlatformError`](@ref).
+
+## Quick start
+
+```julia
+using KeychainServices
+
+secret  = Base.SecretBuffer!(collect(codeunits("s3cr3t")))
+rotated = Base.SecretBuffer!(collect(codeunits("n3w-s3cr3t")))
+item    = GenericPasswordItem(service="com.example.app", account="alice")
+
+add_item!(item, secret)
+
+result = copy_matching(item; return_data=true, return_attributes=true)
+# result.secret  :: Base.SecretBuffer  (the password)
+# result.item    :: GenericPasswordItem (populated from keychain metadata)
+
+update_item!(item, GenericPasswordItem(label="Primary login"); secret=rotated)
+delete_item!(item)
+
+Base.shred!(secret)
+Base.shred!(rotated)
+result.secret !== nothing && Base.shred!(result.secret)
+```
+
+## Keychain targets
+
+The `keychain` field of [`GenericPasswordItem`](@ref) controls which keychain backend is used:
+
+| Type | Behaviour |
+|:-----|:----------|
+| `DataProtectionKeychain()` *(default)* | Modern Data Protection keychain — adds `kSecUseDataProtectionKeychain=true` |
+| `LoginKeychain()` | User's legacy login keychain |
+| `FileKeychain(path)` | Explicit legacy keychain file |
+
+```julia
+# Legacy login keychain
+item = GenericPasswordItem(service="com.example.app", account="alice",
+                           keychain=LoginKeychain())
+
+# Specific keychain file
+item = GenericPasswordItem(service="com.example.app", account="alice",
+                           keychain=FileKeychain("/path/to/my.keychain"))
+```
+
+## Access control (Data Protection keychain)
+
+Use [`AccessControlItem`](@ref) for hardware-backed or biometry-protected items:
+
+```julia
+ctrl = AccessControlItem(
+    :kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly,
+    AccessControlFlags.BiometryAny | AccessControlFlags.DevicePasscode,
+)
+item = GenericPasswordItem(service="com.example.app", account="alice",
+                           access_control=ctrl)
+add_item!(item, secret)
+```
+
+## Design
+
+The low-level [`_cf_dict`](@ref KeychainServices._cf_dict) builder accepts any iterable of
+`(Symbol, Any)` pairs and marshals Julia values into CF objects through `_cf_dict_set!`
+method dispatch:
+
+| Julia type | CF type |
+|:-----------|:--------|
+| `Symbol` | CF constant (via `cglobal`) |
+| `AbstractString` | `CFStringRef` |
+| `Bool` | `kCFBooleanTrue` / `kCFBooleanFalse` |
+| `AbstractVector{UInt8}` | `CFDataRef` |
+| `Base.SecretBuffer` | `CFDataRef` (bytes zeroed after use) |
+| [`AccessControlItem`](@ref) | `SecAccessControlRef` |
+| [`FileKeychain`](@ref) | `SecKeychainRef` (via `SecKeychainOpen`) |
+
+[`GenericPasswordItem`](@ref) implements `Base.pairs` to expose its Security.framework
+key-value pairs, making the top-level CRUD functions thin wrappers:
+
+```julia
+# These two are equivalent
+add_item!(item, secret)
+
+# … what it does under the hood:
+KeychainServices._sec_item_add([pairs(item)..., :kSecValueData => secret])
+```

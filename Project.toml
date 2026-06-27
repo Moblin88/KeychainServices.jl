@@ -1,13 +1,10 @@
-name = "Keyring"
+name = "KeychainServices"
 uuid = "2f89db48-6337-4944-a5a6-9bc2663dd83d"
 authors = ["Nicholas Engelking <moblin88@me.com> and contributors"]
 version = "1.0.0-DEV"
 
+[deps]
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+
 [compat]
-julia = "1.10.10"
-
-[extras]
-Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-
-[targets]
-test = ["Test"]
+julia = "1.12"
