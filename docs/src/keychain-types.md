@@ -110,9 +110,7 @@ end
 To use `DataProtectionKeychain()` from a compiled Julia application, the
 binary must run inside a properly signed macOS `.app` bundle that carries
 the `keychain-access-groups` entitlement. The steps below describe the
-complete workflow, adapted from
-[SecretKeeper](https://github.com/Moblin88/SecretKeeper) — a reference
-implementation of the same signing pipeline for a C binary.
+complete workflow.
 
 ### 1. Compile the Julia application
 
