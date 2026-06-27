@@ -45,7 +45,7 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
         @test item.service  == "svc"
         @test item.account  == "acct"
         @test item.label    === nothing
-        @test item.keychain isa DataProtectionKeychain
+        @test item.keychain isa LoginKeychain
     end
 
     @testset "Secret inputs require SecretBuffer" begin
@@ -68,18 +68,26 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
         @test_throws KeychainOperationError pairs(bad)
     end
 
-    @testset "pairs protocol — DataProtectionKeychain" begin
+    @testset "pairs protocol — LoginKeychain (default)" begin
         item  = GenericPasswordItem(service="svc", account="acct", label="lbl")
         attrs = Dict(pairs(item))
-        @test attrs[:kSecClass]                    == :kSecClassGenericPassword
-        @test attrs[:kSecAttrService]              == "svc"
-        @test attrs[:kSecAttrAccount]              == "acct"
-        @test attrs[:kSecAttrLabel]                == "lbl"
+        @test attrs[:kSecClass]    == :kSecClassGenericPassword
+        @test attrs[:kSecAttrService] == "svc"
+        @test attrs[:kSecAttrAccount] == "acct"
+        @test attrs[:kSecAttrLabel]   == "lbl"
+        @test !haskey(attrs, :kSecUseDataProtectionKeychain)
+        @test !haskey(attrs, :kSecUseKeychain)
+    end
+
+    @testset "pairs protocol — DataProtectionKeychain" begin
+        item  = GenericPasswordItem(service="svc", account="acct", keychain=DataProtectionKeychain())
+        attrs = Dict(pairs(item))
+        @test attrs[:kSecClass]                     == :kSecClassGenericPassword
         @test attrs[:kSecUseDataProtectionKeychain] === true
         @test !haskey(attrs, :kSecUseKeychain)
     end
 
-    @testset "pairs protocol — LoginKeychain" begin
+    @testset "pairs protocol — LoginKeychain (explicit)" begin
         item  = GenericPasswordItem(service="svc", account="acct", keychain=LoginKeychain())
         attrs = Dict(pairs(item))
         @test attrs[:kSecClass] == :kSecClassGenericPassword
@@ -110,78 +118,70 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
         @test AccessControlFlags.ApplicationPassword == UInt64(1 << 31)
     end
 
-    # ── Integration tests (Data Protection keychain) ───────────────────────────
+    # ── Integration tests ──────────────────────────────────────────────────────
 
     @static if Sys.isapple()
 
         has_dp = data_protection_available()
 
-        @testset "Data Protection keychain — basic CRUD" begin
+        # Basic CRUD runs against the login keychain (default), so no entitlement needed.
+        @testset "Login keychain — basic CRUD" begin
             service = "KeychainServices.jl.tests.$(getpid())"
             account = "integration-user"
             item    = GenericPasswordItem(service=service, account=account)
 
-            if has_dp
-                try delete_item!(item) catch e; @test e isa KeychainItemNotFoundError end
+            try delete_item!(item) catch e; @test e isa KeychainItemNotFoundError end
 
-                secret  = secret_buf("integration-secret")
-                rotated = secret_buf("integration-secret-rotated")
+            secret  = secret_buf("integration-secret")
+            rotated = secret_buf("integration-secret-rotated")
 
-                add_item!(item, secret)
+            add_item!(item, secret)
 
-                r1 = copy_matching(item; return_data=true)
-                @test r1.secret == secret
+            r1 = copy_matching(item; return_data=true)
+            @test r1.secret == secret
 
-                r2 = copy_matching(item; return_attributes=true)
-                @test r2.item.service == service
-                @test r2.item.account == account
-                @test r2.created_at === nothing || r2.created_at isa DateTime
-                @test r2.updated_at === nothing || r2.updated_at isa DateTime
+            r2 = copy_matching(item; return_attributes=true)
+            @test r2.item.service == service
+            @test r2.item.account == account
+            @test r2.created_at === nothing || r2.created_at isa DateTime
+            @test r2.updated_at === nothing || r2.updated_at isa DateTime
 
-                update_item!(item, GenericPasswordItem(label="Updated label"); secret=rotated)
-                r3 = copy_matching(item; return_data=true, return_attributes=true)
-                @test r3.secret  == rotated
-                @test r3.item.label == "Updated label"
+            update_item!(item, GenericPasswordItem(label="Updated label"); secret=rotated)
+            r3 = copy_matching(item; return_data=true, return_attributes=true)
+            @test r3.secret      == rotated
+            @test r3.item.label  == "Updated label"
 
-                delete_item!(item)
-                @test_throws KeychainItemNotFoundError copy_matching(item; return_data=true)
+            delete_item!(item)
+            @test_throws KeychainItemNotFoundError copy_matching(item; return_data=true)
 
-                Base.shred!(secret); Base.shred!(rotated)
-                r1.secret !== nothing && Base.shred!(r1.secret)
-                r3.secret !== nothing && Base.shred!(r3.secret)
-            else
-                @test_throws KeychainPermissionError add_item!(item, secret_buf("x"))
-            end
+            Base.shred!(secret); Base.shred!(rotated)
+            r1.secret !== nothing && Base.shred!(r1.secret)
+            r3.secret !== nothing && Base.shred!(r3.secret)
         end
 
-        @testset "Data Protection keychain — tri-state synchronizable" begin
+        @testset "Login keychain — tri-state synchronizable" begin
             service = "KeychainServices.jl.synchronizable.$(getpid())"
             item    = GenericPasswordItem(service=service, account="user", synchronizable=false)
 
-            if has_dp
-                try delete_item!(item) catch e; @test e isa KeychainItemNotFoundError end
+            try delete_item!(item) catch e; @test e isa KeychainItemNotFoundError end
 
-                secret = secret_buf("sync-secret")
-                add_item!(item, secret)
-                r = copy_matching(item; return_data=true, return_attributes=true)
-                @test r.secret == secret
-                @test r.item.synchronizable == false
+            secret = secret_buf("sync-secret")
+            add_item!(item, secret)
+            r = copy_matching(item; return_data=true, return_attributes=true)
+            @test r.secret == secret
+            @test r.item.synchronizable == false
 
-                delete_item!(item)
-                Base.shred!(secret)
-                r.secret !== nothing && Base.shred!(r.secret)
-            else
-                @test_throws KeychainPermissionError add_item!(item, secret_buf("x"))
-            end
+            delete_item!(item)
+            Base.shred!(secret)
+            r.secret !== nothing && Base.shred!(r.secret)
         end
 
-        @testset "Data Protection keychain — extended attributes" begin
+        @testset "Login keychain — extended attributes" begin
             service = "KeychainServices.jl.attrs.$(getpid())"
             item    = GenericPasswordItem(
                 service     = service,
                 account     = "user",
                 label       = "Initial Label",
-                accessible  = :kSecAttrAccessibleWhenUnlocked,
                 description = "Integration description",
                 comment     = "Integration comment",
                 is_invisible= false,
@@ -189,21 +189,77 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
                 generic_data= collect(codeunits("metadata")),
             )
 
+            try delete_item!(item) catch e; @test e isa KeychainItemNotFoundError end
+
+            secret = secret_buf("attr-secret")
+            add_item!(item, secret)
+            r = copy_matching(item; return_data=true, return_attributes=true)
+
+            @test r.secret          == secret
+            @test r.item.service    == service
+            @test r.item.label      == "Initial Label"
+            @test r.item.description === nothing || r.item.description == "Integration description"
+            @test r.item.comment     === nothing || r.item.comment     == "Integration comment"
+            @test r.item.is_invisible === nothing || r.item.is_invisible == false
+            @test r.item.is_negative  === nothing || r.item.is_negative  == false
+            @test r.item.generic_data === nothing || r.item.generic_data == collect(codeunits("metadata"))
+
+            delete_item!(item)
+            Base.shred!(secret)
+            r.secret !== nothing && Base.shred!(r.secret)
+        end
+
+        # Data Protection keychain tests require the keychain-access-groups entitlement.
+        @testset "Data Protection keychain — basic CRUD" begin
+            service = "KeychainServices.jl.dp.tests.$(getpid())"
+            item    = GenericPasswordItem(service=service, account="user",
+                                          keychain=DataProtectionKeychain())
             if has_dp
                 try delete_item!(item) catch e; @test e isa KeychainItemNotFoundError end
 
-                secret = secret_buf("attr-secret")
+                secret  = secret_buf("dp-secret")
+                rotated = secret_buf("dp-secret-rotated")
+
+                add_item!(item, secret)
+                r = copy_matching(item; return_data=true, return_attributes=true)
+                @test r.secret == secret
+                @test r.item.service == service
+
+                update_item!(item, GenericPasswordItem(label="DP label"); secret=rotated)
+                r2 = copy_matching(item; return_data=true, return_attributes=true)
+                @test r2.secret     == rotated
+                @test r2.item.label == "DP label"
+
+                delete_item!(item)
+                Base.shred!(secret); Base.shred!(rotated)
+                r.secret  !== nothing && Base.shred!(r.secret)
+                r2.secret !== nothing && Base.shred!(r2.secret)
+            else
+                @test_throws KeychainPermissionError add_item!(item, secret_buf("x"))
+            end
+        end
+
+        @testset "Data Protection keychain — extended attributes" begin
+            service = "KeychainServices.jl.dp.attrs.$(getpid())"
+            item    = GenericPasswordItem(
+                service     = service,
+                account     = "user",
+                label       = "Initial Label",
+                accessible  = :kSecAttrAccessibleWhenUnlocked,
+                generic_data= collect(codeunits("metadata")),
+                keychain    = DataProtectionKeychain(),
+            )
+
+            if has_dp
+                try delete_item!(item) catch e; @test e isa KeychainItemNotFoundError end
+
+                secret = secret_buf("dp-attr-secret")
                 add_item!(item, secret)
                 r = copy_matching(item; return_data=true, return_attributes=true)
 
-                @test r.secret == secret
-                @test r.item.service == service
-                @test r.item.label   == "Initial Label"
+                @test r.secret         == secret
+                @test r.item.label     == "Initial Label"
                 @test r.item.accessible == :kSecAttrAccessibleWhenUnlocked
-                @test r.item.description === nothing || r.item.description == "Integration description"
-                @test r.item.comment     === nothing || r.item.comment     == "Integration comment"
-                @test r.item.is_invisible === nothing || r.item.is_invisible == false
-                @test r.item.is_negative  === nothing || r.item.is_negative  == false
                 @test r.item.generic_data === nothing || r.item.generic_data == collect(codeunits("metadata"))
 
                 delete_item!(item)
@@ -214,7 +270,7 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
             end
         end
 
-        @testset "Data Protection keychain — synchronizable rejects ThisDeviceOnly" begin
+        @testset "Synchronizable rejects ThisDeviceOnly accessibility" begin
             item = GenericPasswordItem(
                 service        = "KeychainServices.jl.validation.$(getpid())",
                 account        = "user",

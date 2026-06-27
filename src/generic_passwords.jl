@@ -24,8 +24,8 @@ Julia representation of a `kSecClassGenericPassword` keychain item.
 Fields set to `nothing` are omitted from Security.framework query dictionaries.
 
 The `keychain` field controls the keychain backend:
-- [`DataProtectionKeychain()`](@ref) *(default)* — modern iOS-style Data Protection keychain
-- [`LoginKeychain()`](@ref) — user's legacy login keychain
+- [`LoginKeychain()`](@ref) *(default)* — user's login keychain (macOS system default)
+- [`DataProtectionKeychain()`](@ref) — modern iOS-style Data Protection keychain
 - [`FileKeychain(path)`](@ref) — specific legacy keychain file
 
 Access-control policies for the Data Protection keychain can be expressed with an
@@ -76,7 +76,7 @@ Base.@kwdef struct GenericPasswordItem <: AbstractKeychainItem
     is_negative::Union{Nothing, Bool}            = nothing
     generic_data::Union{Nothing, Vector{UInt8}}  = nothing
     access_control::Union{Nothing, AccessControlItem} = nothing
-    keychain::KeychainTarget                     = DataProtectionKeychain()
+    keychain::KeychainTarget                     = LoginKeychain()
 end
 
 _is_this_device_only(accessible::Symbol) = endswith(String(accessible), "ThisDeviceOnly")

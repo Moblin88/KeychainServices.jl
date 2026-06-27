@@ -43,8 +43,8 @@ The `keychain` field of [`GenericPasswordItem`](@ref) controls which keychain ba
 
 | Type | Behaviour |
 |:-----|:----------|
-| `DataProtectionKeychain()` *(default)* | Modern Data Protection keychain — adds `kSecUseDataProtectionKeychain=true` |
-| `LoginKeychain()` | User's legacy login keychain |
+| `LoginKeychain()` *(default)* | User's login keychain (macOS system default) |
+| `DataProtectionKeychain()` | Modern Data Protection keychain — adds `kSecUseDataProtectionKeychain=true` |
 | `FileKeychain(path)` | Explicit legacy keychain file |
 
 ```julia
