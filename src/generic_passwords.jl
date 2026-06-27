@@ -234,10 +234,10 @@ function copy_matching(
             throw(KeychainOperationError("Unsupported kSecUseAuthenticationUI value: $use_authentication_ui"))
     end
 
-    # Resolve the IO target for secret bytes. Auto-create a SecretBuffer when
-    # the caller didn't supply one so we can seekstart it before returning.
+    # When return_data=true and no secret_output was supplied, auto-create a
+    # SecretBuffer and seekstart it before returning so callers can read immediately.
     auto_created = return_data && secret_output === nothing
-    io = auto_created ? Base.SecretBuffer() : (secret_output !== nothing ? secret_output : IOBuffer())
+    io = auto_created ? Base.SecretBuffer() : secret_output
 
     query = Pair{Symbol,Any}[pairs(item)...]
     push!(query, :kSecReturnData       => return_data)
