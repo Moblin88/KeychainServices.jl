@@ -11,8 +11,6 @@ The current API is scoped to generic password items. Other Keychain item classes
 
 The package calls Security.framework natively through Julia `@ccall` bindings. It does not shell out to the `security` command-line tool.
 
-All keychain operations target the Data Protection keychain. This behavior is automatic and not configurable.
-
 ## Platform Support
 
 - macOS: supported
@@ -82,7 +80,7 @@ Additional supported generic-password attributes:
 - `is_invisible`
 - `is_negative`
 - `generic_data` (`Vector{UInt8}`)
-- `access_control` (`Ptr{Cvoid}`, advanced usage)
+- `access_control` (`AccessControlItem`, for hardware-backed / biometry-protected items)
 
 Query-time use restrictions for `copy_matching`:
 
@@ -90,8 +88,6 @@ Query-time use restrictions for `copy_matching`:
 - `use_operation_prompt`
 
 Validation rule: `synchronizable=true` cannot be combined with `accessible` values ending in `ThisDeviceOnly`.
-
-Migration note: the `data_protection_keychain` keyword was removed from `GenericPasswordItem` because Data Protection keychain targeting is now always enforced.
 
 ## Metadata
 
@@ -120,13 +116,3 @@ Typed errors are exposed for predictable failure handling:
 - `KeychainItemNotFoundError`
 - `KeychainPermissionError`
 - `KeychainOperationError`
-
-## Migration From Keyring.jl
-
-This refactor is intentionally breaking.
-
-- `using Keyring` becomes `using KeychainServices`
-- Positional helpers like `set_password!` / `get_password` were replaced by typed `GenericPasswordItem` CRUD APIs
-- The cross-platform provider registry and Windows/Linux stubs were removed
-- The package is now explicitly scoped to Apple's Keychain Services API
-- The current implementation only covers generic password items
