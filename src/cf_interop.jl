@@ -36,9 +36,13 @@ end
 
 # ── CF dict builder ────────────────────────────────────────────────────────────
 
-# Build a CFMutableDictionary from `init` (iterable of (Symbol, Any) pairs),
-# call f(dict), then release the dictionary. Values are marshaled into CF
-# objects via _cf_dict_set! dispatch.
+"""
+    _cf_dict(f, pairs_iter)
+
+Build a `CFMutableDictionary` from `pairs_iter` (iterable of `(Symbol, Any)`
+pairs), call `f(dict)`, then release the dictionary. Values are marshaled into
+CF objects via `_cf_dict_set!` dispatch.
+"""
 function _cf_dict(f, init)
     key_cb = cglobal(:kCFTypeDictionaryKeyCallBacks, Cvoid)
     val_cb = cglobal(:kCFTypeDictionaryValueCallBacks, Cvoid)
