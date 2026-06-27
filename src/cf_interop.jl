@@ -20,6 +20,12 @@ const errSecAuthFailed           = Int32(-25293)
 const errSecInteractionNotAllowed= Int32(-25308)
 const errSecMissingEntitlement   = Int32(-34018)
 
+const _AUTH_UI_VALUES = (
+    :kSecUseAuthenticationUIAllow,
+    :kSecUseAuthenticationUIFail,
+    :kSecUseAuthenticationUISkip,
+)
+
 # Load a Security / CoreFoundation framework constant by its symbol name.
 # Each kSecXxx is declared `extern CFTypeRef kSecXxx` in the framework headers,
 # so the symbol address holds a pointer-sized value (the CFTypeRef itself).
@@ -37,13 +43,13 @@ end
 # ── CF dict builder ────────────────────────────────────────────────────────────
 
 """
-    _cf_dict(f, pairs_iter)
+    _cf_dict(f, pairs_iter, target::KeychainTarget = LoginKeychain())
 
 Build a `CFMutableDictionary` from `pairs_iter` (iterable of `(Symbol, Any)`
-pairs), call `f(dict)`, then release the dictionary. Values are marshaled into
-CF objects via `_cf_dict_set!` dispatch.
+pairs), apply the keychain target, call `f(dict)`, then release the dictionary.
+Values are marshaled into CF objects via `_julia_to_cf` dispatch.
 """
-function _cf_dict(f, init)
+function _cf_dict(f, init, target::KeychainTarget = LoginKeychain())
     key_cb = cglobal(:kCFTypeDictionaryKeyCallBacks, Cvoid)
     val_cb = cglobal(:kCFTypeDictionaryValueCallBacks, Cvoid)
 
@@ -59,71 +65,61 @@ function _cf_dict(f, init)
         for (k, v) in init
             _cf_dict_set!(dict, k, v)
         end
+        _apply_keychain_target!(dict, target)
         return f(dict)
     finally
         @ccall CFRelease(dict::Ptr{Cvoid})::Cvoid
     end
 end
 
-# ── _cf_dict_set! dispatch ─────────────────────────────────────────────────────
+# ── Julia → CF marshalling ─────────────────────────────────────────────────────
+#
+# _julia_to_cf(f, value) creates the appropriate CF object for value, calls
+# f(cf_ptr), then releases it. Types that borrow an existing CF constant (Symbol,
+# Bool, Ptr{Cvoid}) call f directly with no allocation or release.
 
-function _cf_dict_set!(dict::Ptr{Cvoid}, key::Symbol, value::Symbol)
-    @ccall CFDictionarySetValue(
-        dict::Ptr{Cvoid}, _sec(key)::Ptr{Cvoid}, _sec(value)::Ptr{Cvoid}
-    )::Cvoid
-end
+_julia_to_cf(f, value::Symbol)     = f(_sec(value))
+_julia_to_cf(f, value::Bool)       = f(value ? _sec(:kCFBooleanTrue) : _sec(:kCFBooleanFalse))
+_julia_to_cf(f, value::Ptr{Cvoid}) = f(value)
 
-function _cf_dict_set!(dict::Ptr{Cvoid}, key::Symbol, value::AbstractString)
+function _julia_to_cf(f, value::AbstractString)
     cfstr = @ccall CFStringCreateWithCString(
         C_NULL::Ptr{Cvoid}, String(value)::Cstring, UInt32(4)::UInt32  # kCFStringEncodingUTF8
     )::Ptr{Cvoid}
     cfstr == C_NULL && throw(KeychainOperationError("CFStringCreateWithCString returned NULL"))
     try
-        @ccall CFDictionarySetValue(dict::Ptr{Cvoid}, _sec(key)::Ptr{Cvoid}, cfstr::Ptr{Cvoid})::Cvoid
+        f(cfstr)
     finally
         @ccall CFRelease(cfstr::Ptr{Cvoid})::Cvoid
     end
 end
 
-function _cf_dict_set!(dict::Ptr{Cvoid}, key::Symbol, value::Bool)
-    cfbool = value ? _sec(:kCFBooleanTrue) : _sec(:kCFBooleanFalse)
-    @ccall CFDictionarySetValue(dict::Ptr{Cvoid}, _sec(key)::Ptr{Cvoid}, cfbool::Ptr{Cvoid})::Cvoid
-end
-
-function _cf_dict_set!(dict::Ptr{Cvoid}, key::Symbol, value::Ptr{Cvoid})
-    @ccall CFDictionarySetValue(dict::Ptr{Cvoid}, _sec(key)::Ptr{Cvoid}, value::Ptr{Cvoid})::Cvoid
-end
-
-function _cf_dict_set!(dict::Ptr{Cvoid}, key::Symbol, value::AbstractVector{UInt8})
-    ptr = isempty(value) ? C_NULL : pointer(value)
-    cfdata = GC.@preserve value begin
-        @ccall CFDataCreate(
-            C_NULL::Ptr{Cvoid}, ptr::Ptr{Cuchar}, Int64(length(value))::Int64
-        )::Ptr{Cvoid}
-    end
+function _julia_to_cf(f, value::AbstractVector{UInt8})
+    ptr    = isempty(value) ? C_NULL : pointer(value)
+    cfdata = GC.@preserve value @ccall CFDataCreate(
+        C_NULL::Ptr{Cvoid}, ptr::Ptr{Cuchar}, Int64(length(value))::Int64
+    )::Ptr{Cvoid}
     cfdata == C_NULL && throw(KeychainOperationError("CFDataCreate returned NULL"))
     try
-        @ccall CFDictionarySetValue(dict::Ptr{Cvoid}, _sec(key)::Ptr{Cvoid}, cfdata::Ptr{Cvoid})::Cvoid
+        f(cfdata)
     finally
         @ccall CFRelease(cfdata::Ptr{Cvoid})::Cvoid
     end
 end
 
-
-# Marshal an AccessControlItem into a SecAccessControlRef.
-function _cf_dict_set!(dict::Ptr{Cvoid}, key::Symbol, value::AccessControlItem)
+function _julia_to_cf(f, value::AccessControlItem)
     error_ref = Ref{Ptr{Cvoid}}(C_NULL)
-    acc_ref = @ccall SecAccessControlCreateWithFlags(
+    acc_ref   = @ccall SecAccessControlCreateWithFlags(
         C_NULL::Ptr{Cvoid},
         _sec(value.accessible)::Ptr{Cvoid},
         value.flags::UInt64,
-        error_ref::Ref{Ptr{Cvoid}}
+        error_ref::Ref{Ptr{Cvoid}},
     )::Ptr{Cvoid}
     if acc_ref == C_NULL
         msg = "SecAccessControlCreateWithFlags failed for $(value.accessible)"
         if error_ref[] != C_NULL
             desc_cf = @ccall CFErrorCopyDescription(error_ref[]::Ptr{Cvoid})::Ptr{Cvoid}
-            detail = desc_cf != C_NULL ? something(_cfstring_to_string(desc_cf), "unknown error") : "unknown error"
+            detail  = desc_cf != C_NULL ? something(_cf_to_julia(desc_cf, String), "unknown error") : "unknown error"
             desc_cf != C_NULL && @ccall CFRelease(desc_cf::Ptr{Cvoid})::Cvoid
             @ccall CFRelease(error_ref[]::Ptr{Cvoid})::Cvoid
             msg *= ": $detail"
@@ -131,37 +127,53 @@ function _cf_dict_set!(dict::Ptr{Cvoid}, key::Symbol, value::AccessControlItem)
         throw(KeychainOperationError(msg))
     end
     try
-        @ccall CFDictionarySetValue(dict::Ptr{Cvoid}, _sec(key)::Ptr{Cvoid}, acc_ref::Ptr{Cvoid})::Cvoid
+        f(acc_ref)
     finally
         @ccall CFRelease(acc_ref::Ptr{Cvoid})::Cvoid
     end
 end
 
-# Open a legacy keychain file and set both the keys the Security framework needs:
-#   kSecUseKeychain     — tells SecItemAdd which keychain to store into
-#   kSecMatchSearchList — tells SecItemCopyMatching/Update/Delete which keychains to search
-# Both are set from one SecKeychainOpen call; having both keys in the dict is harmless
-# (each SecItem operation uses only the key it cares about).
-function _cf_dict_set!(dict::Ptr{Cvoid}, ::Symbol, value::FileKeychain)
+# ── _cf_dict_set! ──────────────────────────────────────────────────────────────
+
+# Generic: marshal value to CF, set it under key, release.
+function _cf_dict_set!(dict::Ptr{Cvoid}, key::Symbol, value)
+    _julia_to_cf(value) do cf_val
+        @ccall CFDictionarySetValue(dict::Ptr{Cvoid}, _sec(key)::Ptr{Cvoid}, cf_val::Ptr{Cvoid})::Cvoid
+    end
+end
+
+# ── _apply_keychain_target! ────────────────────────────────────────────────────
+#
+# Called by _cf_dict after the pairs loop to apply keychain routing.
+# Login and DataProtection are handled entirely via their pairs entries;
+# FileKeychain requires opening a handle and setting two keys.
+
+_apply_keychain_target!(::Ptr{Cvoid}, ::LoginKeychain)          = nothing
+
+function _apply_keychain_target!(dict::Ptr{Cvoid}, ::DataProtectionKeychain)
+    _cf_dict_set!(dict, :kSecUseDataProtectionKeychain, true)
+end
+
+function _apply_keychain_target!(dict::Ptr{Cvoid}, kc::FileKeychain)
     kc_ref = Ref{Ptr{Cvoid}}(C_NULL)
-    status = @ccall SecKeychainOpen(value.path::Cstring, kc_ref::Ref{Ptr{Cvoid}})::Int32
+    status = @ccall SecKeychainOpen(kc.path::Cstring, kc_ref::Ref{Ptr{Cvoid}})::Int32
     status != 0 && throw(KeychainOperationError(
-        "SecKeychainOpen(\"$(value.path)\") failed with OSStatus $status"
+        "SecKeychainOpen(\"$(kc.path)\") failed with OSStatus $status"
     ))
-    kc = kc_ref[]
-    kc == C_NULL && throw(KeychainOperationError(
-        "SecKeychainOpen returned a NULL ref for \"$(value.path)\""
+    kc_ref_val = kc_ref[]
+    kc_ref_val == C_NULL && throw(KeychainOperationError(
+        "SecKeychainOpen returned a NULL ref for \"$(kc.path)\""
     ))
     try
         # kSecUseKeychain: for SecItemAdd
         @ccall CFDictionarySetValue(
-            dict::Ptr{Cvoid}, _sec(:kSecUseKeychain)::Ptr{Cvoid}, kc::Ptr{Cvoid}
+            dict::Ptr{Cvoid}, _sec(:kSecUseKeychain)::Ptr{Cvoid}, kc_ref_val::Ptr{Cvoid}
         )::Cvoid
 
         # kSecMatchSearchList: for SecItemCopyMatching / SecItemUpdate / SecItemDelete
         cb  = cglobal(:kCFTypeArrayCallBacks, Cvoid)
-        arr = GC.@preserve kc @ccall CFArrayCreate(
-            C_NULL::Ptr{Cvoid}, Ref(kc)::Ptr{Ptr{Cvoid}}, Int64(1)::Int64, cb::Ptr{Cvoid}
+        arr = GC.@preserve kc_ref_val @ccall CFArrayCreate(
+            C_NULL::Ptr{Cvoid}, Ref(kc_ref_val)::Ptr{Ptr{Cvoid}}, Int64(1)::Int64, cb::Ptr{Cvoid}
         )::Ptr{Cvoid}
         arr == C_NULL && throw(KeychainOperationError("CFArrayCreate returned NULL"))
         try
@@ -172,7 +184,7 @@ function _cf_dict_set!(dict::Ptr{Cvoid}, ::Symbol, value::FileKeychain)
             @ccall CFRelease(arr::Ptr{Cvoid})::Cvoid
         end
     finally
-        @ccall CFRelease(kc::Ptr{Cvoid})::Cvoid
+        @ccall CFRelease(kc_ref_val::Ptr{Cvoid})::Cvoid
     end
 end
 
@@ -216,16 +228,16 @@ end
 
 # ── SecItem CRUD wrappers ──────────────────────────────────────────────────────
 
-function _sec_item_add(query_init)
-    _cf_dict(query_init) do dict
+function _sec_item_add(query_init, target::KeychainTarget = LoginKeychain())
+    _cf_dict(query_init, target) do dict
         status = @ccall SecItemAdd(dict::Ptr{Cvoid}, C_NULL::Ptr{Cvoid})::Int32
         status != errSecSuccess && throw(_classify_keychain_error(status))
     end
     return nothing
 end
 
-function _sec_item_copy_matching(query_init)
-    _cf_dict(query_init) do dict
+function _sec_item_copy_matching(query_init, target::KeychainTarget = LoginKeychain())
+    _cf_dict(query_init, target) do dict
         result_ref = Ref{Ptr{Cvoid}}(C_NULL)
         status = @ccall SecItemCopyMatching(dict::Ptr{Cvoid}, result_ref::Ref{Ptr{Cvoid}})::Int32
         status != errSecSuccess && throw(_classify_keychain_error(status))
@@ -234,8 +246,8 @@ function _sec_item_copy_matching(query_init)
 end
 
 # Returns a CFArrayRef (caller must CFRelease), or C_NULL when no items match.
-function _sec_item_copy_all(query_init)
-    _cf_dict(query_init) do dict
+function _sec_item_copy_all(query_init, target::KeychainTarget = LoginKeychain())
+    _cf_dict(query_init, target) do dict
         result_ref = Ref{Ptr{Cvoid}}(C_NULL)
         status = @ccall SecItemCopyMatching(dict::Ptr{Cvoid}, result_ref::Ref{Ptr{Cvoid}})::Int32
         status == errSecItemNotFound && return C_NULL
@@ -244,8 +256,8 @@ function _sec_item_copy_all(query_init)
     end
 end
 
-function _sec_item_update(query_init, attrs_init)
-    _cf_dict(query_init) do query
+function _sec_item_update(query_init, attrs_init, target::KeychainTarget = LoginKeychain())
+    _cf_dict(query_init, target) do query
         _cf_dict(attrs_init) do attrs
             status = @ccall SecItemUpdate(query::Ptr{Cvoid}, attrs::Ptr{Cvoid})::Int32
             status != errSecSuccess && throw(_classify_keychain_error(status))
@@ -254,8 +266,8 @@ function _sec_item_update(query_init, attrs_init)
     return nothing
 end
 
-function _sec_item_delete(query_init)
-    _cf_dict(query_init) do dict
+function _sec_item_delete(query_init, target::KeychainTarget = LoginKeychain())
+    _cf_dict(query_init, target) do dict
         status = @ccall SecItemDelete(dict::Ptr{Cvoid})::Int32
         status != errSecSuccess && throw(_classify_keychain_error(status))
     end
@@ -268,47 +280,56 @@ function _cf_dict_get(dict::Ptr{Cvoid}, key::Symbol)
     @ccall CFDictionaryGetValue(dict::Ptr{Cvoid}, _sec(key)::Ptr{Cvoid})::Ptr{Cvoid}
 end
 
+function _cf_dict_get(dict::Ptr{Cvoid}, key::Symbol, T::Type, args...)
+    p = _cf_dict_get(dict, key)
+    p == C_NULL ? nothing : _cf_to_julia(p, T, args...)
+end
+
 # ── CF → Julia converters ──────────────────────────────────────────────────────
 
-function _cfstring_to_string(cfstr::Ptr{Cvoid})
-    cfstr == C_NULL && return nothing
-    cstr = @ccall CFStringGetCStringPtr(cfstr::Ptr{Cvoid}, UInt32(4)::UInt32)::Cstring
+function _cf_to_julia(p::Ptr{Cvoid}, ::Type{String})
+    cstr = @ccall CFStringGetCStringPtr(p::Ptr{Cvoid}, UInt32(4)::UInt32)::Cstring
     if cstr != C_NULL
         return unsafe_string(cstr)
     end
     # Slow path: CFStringGetCStringPtr may return NULL for some encodings.
-    len = @ccall CFStringGetLength(cfstr::Ptr{Cvoid})::Int64
+    len = @ccall CFStringGetLength(p::Ptr{Cvoid})::Int64
     buf = Vector{UInt8}(undef, len * 4 + 1)
     ok = GC.@preserve buf @ccall CFStringGetCString(
-        cfstr::Ptr{Cvoid}, pointer(buf)::Ptr{Cuchar}, Int64(length(buf))::Int64, UInt32(4)::UInt32
+        p::Ptr{Cvoid}, pointer(buf)::Ptr{Cuchar}, Int64(length(buf))::Int64, UInt32(4)::UInt32
     )::Bool
     ok || return nothing
     return GC.@preserve buf unsafe_string(pointer(buf))
 end
 
-function _cfboolean_to_bool(cfbool::Ptr{Cvoid})
-    cfbool == C_NULL && return nothing
-    return @ccall CFBooleanGetValue(cfbool::Ptr{Cvoid})::Bool
+function _cf_to_julia(p::Ptr{Cvoid}, ::Type{Bool})
+    return @ccall CFBooleanGetValue(p::Ptr{Cvoid})::Bool
 end
 
 # CFAbsoluteTime epoch: 2001-01-01T00:00:00 UTC
 const _CF_EPOCH = DateTime(2001, 1, 1, 0, 0, 0)
 
-function _cfdate_to_datetime(cfdate::Ptr{Cvoid})
-    cfdate == C_NULL && return nothing
-    abs_time = @ccall CFDateGetAbsoluteTime(cfdate::Ptr{Cvoid})::Float64
+function _cf_to_julia(p::Ptr{Cvoid}, ::Type{DateTime})
+    abs_time = @ccall CFDateGetAbsoluteTime(p::Ptr{Cvoid})::Float64
     return _CF_EPOCH + Dates.Millisecond(round(Int64, abs_time * 1000))
 end
 
-function _cfdata_to_bytes(cfdata::Ptr{Cvoid})
-    cfdata == C_NULL && return nothing
-    len       = @ccall CFDataGetLength(cfdata::Ptr{Cvoid})::Int64
-    bytes_ptr = @ccall CFDataGetBytePtr(cfdata::Ptr{Cvoid})::Ptr{Cuchar}
+function _cf_to_julia(p::Ptr{Cvoid}, ::Type{Vector{UInt8}})
+    len       = @ccall CFDataGetLength(p::Ptr{Cvoid})::Int64
+    bytes_ptr = @ccall CFDataGetBytePtr(p::Ptr{Cvoid})::Ptr{Cuchar}
     out = Vector{UInt8}(undef, Int(len))
     GC.@preserve out begin
         len > 0 && unsafe_copyto!(pointer(out), Ptr{UInt8}(bytes_ptr), Int(len))
     end
     return out
+end
+
+# Symbol reverse-lookup requires the valid-constants set since CF doesn't self-describe identity.
+function _cf_to_julia(p::Ptr{Cvoid}, ::Type{Symbol}, constants)
+    for sym in constants
+        _sec(sym) == p && return sym
+    end
+    return nothing
 end
 
 function _cfdata_write_io(cfdata::Ptr{Cvoid}, io::IO)
@@ -325,11 +346,94 @@ function _cfdata_write_io(cfdata::Ptr{Cvoid}, io::IO)
     end
 end
 
-function _cf_constant_to_symbol(cf_value::Ptr{Cvoid}, constants)
-    cf_value == C_NULL && return nothing
-    for sym in constants
-        _sec(sym) == cf_value && return sym
+# ── Generic CRUD implementations ───────────────────────────────────────────────
+#
+# These work for any AbstractKeychainItem that implements:
+#   • Base.pairs(item)      — full query dict including kSecClass + keychain target
+#   • _update_pairs(item)   — mutable attribute pairs only (no kSecClass, no target keys)
+#   • _parse_item_result(attrs::Ptr{Cvoid}, fallback::T) — deserialize a CF dict back into T
+
+function add_item!(item::AbstractKeychainItem, secret::Union{IO, AbstractVector{UInt8}, AbstractString})
+    _with_secret_bytes(secret) do bytes
+        _sec_item_add([pairs(item)..., :kSecValueData => bytes], keychain_target(item))
     end
+    return nothing
+end
+
+function search_items(query::T) where T <: AbstractKeychainItem
+    q = Pair{Symbol,Any}[pairs(query)...]
+    push!(q, :kSecReturnAttributes => true)
+    push!(q, :kSecMatchLimit       => :kSecMatchLimitAll)
+
+    arr = _sec_item_copy_all(q, keychain_target(query))
+    arr == C_NULL && return T[]
+    try
+        count = @ccall CFArrayGetCount(arr::Ptr{Cvoid})::Int64
+        return [
+            _parse_item_result(
+                @ccall(CFArrayGetValueAtIndex(arr::Ptr{Cvoid}, Int64(i - 1)::Int64)::Ptr{Cvoid}),
+                query,
+            )
+            for i in 1:count
+        ]
+    finally
+        @ccall CFRelease(arr::Ptr{Cvoid})::Cvoid
+    end
+end
+
+function copy_secret(
+    item::AbstractKeychainItem;
+    into::Union{Nothing, IO}                             = nothing,
+    use_authentication_ui::Union{Nothing, Symbol}        = nothing,
+    use_operation_prompt::Union{Nothing, AbstractString} = nothing,
+)
+    if use_authentication_ui !== nothing
+        use_authentication_ui in _AUTH_UI_VALUES ||
+            throw(KeychainOperationError("Unsupported kSecUseAuthenticationUI value: $use_authentication_ui"))
+    end
+
+    auto_created = into === nothing
+    io = auto_created ? Base.SecretBuffer() : into
+
+    query = Pair{Symbol,Any}[pairs(item)...]
+    push!(query, :kSecReturnData  => true)
+    push!(query, :kSecMatchLimit  => :kSecMatchLimitOne)
+    use_authentication_ui !== nothing && push!(query, :kSecUseAuthenticationUI => use_authentication_ui)
+    use_operation_prompt  !== nothing && push!(query, :kSecUseOperationPrompt  => use_operation_prompt)
+
+    try
+        result = _sec_item_copy_matching(query, keychain_target(item))
+        try
+            _cfdata_write_io(result, io)
+        finally
+            result != C_NULL && @ccall CFRelease(result::Ptr{Cvoid})::Cvoid
+        end
+    catch
+        auto_created && Base.shred!(io)
+        rethrow()
+    end
+    auto_created && seekstart(io)
+    return io
+end
+
+function update_item!(
+    query::AbstractKeychainItem,
+    attributes::AbstractKeychainItem;
+    secret::Union{Nothing, IO, AbstractVector{UInt8}, AbstractString} = nothing,
+)
+    update = _update_pairs(attributes)
+    if secret !== nothing
+        _with_secret_bytes(secret) do bytes
+            _sec_item_update(pairs(query), [update..., :kSecValueData => bytes], keychain_target(query))
+        end
+    else
+        _sec_item_update(pairs(query), update, keychain_target(query))
+    end
+    return nothing
+end
+
+function delete_item!(item::AbstractKeychainItem)
+    _sec_item_delete(pairs(item), keychain_target(item))
     return nothing
 end
 

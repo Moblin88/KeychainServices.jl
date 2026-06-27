@@ -94,8 +94,8 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
     @testset "pairs protocol — DataProtectionKeychain" begin
         item  = GenericPasswordItem(service="svc", account="acct", keychain=DataProtectionKeychain())
         attrs = Dict(pairs(item))
-        @test attrs[:kSecClass]                     == :kSecClassGenericPassword
-        @test attrs[:kSecUseDataProtectionKeychain] === true
+        @test attrs[:kSecClass] == :kSecClassGenericPassword
+        @test !haskey(attrs, :kSecUseDataProtectionKeychain)  # applied via _apply_keychain_target!, not pairs
         @test !haskey(attrs, :kSecUseKeychain)
     end
 
@@ -105,6 +105,12 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
         @test attrs[:kSecClass] == :kSecClassGenericPassword
         @test !haskey(attrs, :kSecUseDataProtectionKeychain)
         @test !haskey(attrs, :kSecUseKeychain)
+    end
+
+    @testset "keychain_target dispatch" begin
+        @test keychain_target(GenericPasswordItem(service="svc")) isa LoginKeychain
+        @test keychain_target(GenericPasswordItem(service="svc", keychain=DataProtectionKeychain())) isa DataProtectionKeychain
+        @test keychain_target(GenericPasswordItem(service="svc", keychain=FileKeychain("/tmp/x"))) isa FileKeychain
     end
 
     @testset "pairs protocol — access_control takes precedence over accessible" begin

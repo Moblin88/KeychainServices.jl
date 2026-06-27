@@ -8,12 +8,6 @@ const _ACCESSIBLE_VALUES = (
     :kSecAttrAccessibleAlways,
 )
 
-const _AUTH_UI_VALUES = (
-    :kSecUseAuthenticationUIAllow,
-    :kSecUseAuthenticationUIFail,
-    :kSecUseAuthenticationUISkip,
-)
-
 """
     GenericPasswordItem(; service, account, label, synchronizable, accessible,
                           access_group, description, comment, is_invisible,
@@ -84,6 +78,8 @@ Base.@kwdef struct GenericPasswordItem <: AbstractKeychainItem
     updated_at::Union{Nothing, DateTime}         = nothing
 end
 
+KeychainServices.keychain_target(item::GenericPasswordItem) = item.keychain
+
 _is_this_device_only(accessible::Symbol) = endswith(String(accessible), "ThisDeviceOnly")
 
 function _validate_generic_password_item(item::GenericPasswordItem)
@@ -132,7 +128,6 @@ function Base.pairs(item::GenericPasswordItem)
         push!(attrs, :kSecAttrAccessible => item.accessible)
     end
 
-    append!(attrs, _keychain_target_pairs(item.keychain))
     return attrs
 end
 
@@ -163,118 +158,26 @@ end
 
 @static if Sys.isapple()
 
-function _parse_generic_password_result(attrs::Ptr{Cvoid}, fallback::GenericPasswordItem)
-    get_str(key)   = let p = _cf_dict_get(attrs, key); p == C_NULL ? nothing : _cfstring_to_string(p) end
-    get_bool(key)  = let p = _cf_dict_get(attrs, key); p == C_NULL ? nothing : _cfboolean_to_bool(p) end
-    get_bytes(key) = let p = _cf_dict_get(attrs, key); p == C_NULL ? nothing : _cfdata_to_bytes(p) end
-    get_date(key)  = let p = _cf_dict_get(attrs, key); p == C_NULL ? nothing : _cfdate_to_datetime(p) end
-    get_const(key, syms) = let p = _cf_dict_get(attrs, key)
-        p == C_NULL ? nothing : _cf_constant_to_symbol(p, syms)
-    end
-
+function _parse_item_result(attrs::Ptr{Cvoid}, fallback::GenericPasswordItem)
     coalesce(a, b) = a !== nothing ? a : b
 
     return GenericPasswordItem(
-        service        = coalesce(get_str(:kSecAttrService),                          fallback.service),
-        account        = coalesce(get_str(:kSecAttrAccount),                          fallback.account),
-        label          = coalesce(get_str(:kSecAttrLabel),                            fallback.label),
-        synchronizable = coalesce(get_bool(:kSecAttrSynchronizable),                  fallback.synchronizable),
-        accessible     = coalesce(get_const(:kSecAttrAccessible, _ACCESSIBLE_VALUES), fallback.accessible),
-        access_group   = coalesce(get_str(:kSecAttrAccessGroup),                      fallback.access_group),
-        description    = coalesce(get_str(:kSecAttrDescription),                      fallback.description),
-        comment        = coalesce(get_str(:kSecAttrComment),                          fallback.comment),
-        is_invisible   = coalesce(get_bool(:kSecAttrIsInvisible),                     fallback.is_invisible),
-        is_negative    = coalesce(get_bool(:kSecAttrIsNegative),                      fallback.is_negative),
-        generic_data   = coalesce(get_bytes(:kSecAttrGeneric),                        fallback.generic_data),
+        service        = coalesce(_cf_dict_get(attrs, :kSecAttrService,        String),                          fallback.service),
+        account        = coalesce(_cf_dict_get(attrs, :kSecAttrAccount,        String),                          fallback.account),
+        label          = coalesce(_cf_dict_get(attrs, :kSecAttrLabel,          String),                          fallback.label),
+        synchronizable = coalesce(_cf_dict_get(attrs, :kSecAttrSynchronizable, Bool),                            fallback.synchronizable),
+        accessible     = coalesce(_cf_dict_get(attrs, :kSecAttrAccessible,     Symbol, _ACCESSIBLE_VALUES),      fallback.accessible),
+        access_group   = coalesce(_cf_dict_get(attrs, :kSecAttrAccessGroup,    String),                          fallback.access_group),
+        description    = coalesce(_cf_dict_get(attrs, :kSecAttrDescription,    String),                          fallback.description),
+        comment        = coalesce(_cf_dict_get(attrs, :kSecAttrComment,        String),                          fallback.comment),
+        is_invisible   = coalesce(_cf_dict_get(attrs, :kSecAttrIsInvisible,    Bool),                            fallback.is_invisible),
+        is_negative    = coalesce(_cf_dict_get(attrs, :kSecAttrIsNegative,     Bool),                            fallback.is_negative),
+        generic_data   = coalesce(_cf_dict_get(attrs, :kSecAttrGeneric,        Vector{UInt8}),                   fallback.generic_data),
         access_control = fallback.access_control,
         keychain       = fallback.keychain,
-        created_at     = get_date(:kSecAttrCreationDate),
-        updated_at     = get_date(:kSecAttrModificationDate),
+        created_at     = _cf_dict_get(attrs, :kSecAttrCreationDate,     DateTime),
+        updated_at     = _cf_dict_get(attrs, :kSecAttrModificationDate, DateTime),
     )
-end
-
-function add_item!(item::GenericPasswordItem, secret::Union{IO, AbstractVector{UInt8}, AbstractString})
-    _with_secret_bytes(secret) do bytes
-        _sec_item_add([pairs(item)..., :kSecValueData => bytes])
-    end
-    return nothing
-end
-
-function search_items(query::GenericPasswordItem)
-    q = Pair{Symbol,Any}[pairs(query)...]
-    push!(q, :kSecReturnAttributes => true)
-    push!(q, :kSecMatchLimit       => :kSecMatchLimitAll)
-
-    arr = _sec_item_copy_all(q)
-    arr == C_NULL && return GenericPasswordItem[]
-    try
-        count = @ccall CFArrayGetCount(arr::Ptr{Cvoid})::Int64
-        return [
-            _parse_generic_password_result(
-                @ccall(CFArrayGetValueAtIndex(arr::Ptr{Cvoid}, Int64(i - 1)::Int64)::Ptr{Cvoid}),
-                query,
-            )
-            for i in 1:count
-        ]
-    finally
-        @ccall CFRelease(arr::Ptr{Cvoid})::Cvoid
-    end
-end
-
-function copy_secret(
-    item::GenericPasswordItem;
-    into::Union{Nothing, IO}                             = nothing,
-    use_authentication_ui::Union{Nothing, Symbol}        = nothing,
-    use_operation_prompt::Union{Nothing, AbstractString} = nothing,
-)
-    if use_authentication_ui !== nothing
-        use_authentication_ui in _AUTH_UI_VALUES ||
-            throw(KeychainOperationError("Unsupported kSecUseAuthenticationUI value: $use_authentication_ui"))
-    end
-
-    auto_created = into === nothing
-    io = auto_created ? Base.SecretBuffer() : into
-
-    query = Pair{Symbol,Any}[pairs(item)...]
-    push!(query, :kSecReturnData  => true)
-    push!(query, :kSecMatchLimit  => :kSecMatchLimitOne)
-    use_authentication_ui !== nothing && push!(query, :kSecUseAuthenticationUI => use_authentication_ui)
-    use_operation_prompt  !== nothing && push!(query, :kSecUseOperationPrompt  => use_operation_prompt)
-
-    try
-        result = _sec_item_copy_matching(query)
-        try
-            _cfdata_write_io(result, io)
-        finally
-            result != C_NULL && @ccall CFRelease(result::Ptr{Cvoid})::Cvoid
-        end
-    catch
-        auto_created && Base.shred!(io)
-        rethrow()
-    end
-    auto_created && seekstart(io)
-    return io
-end
-
-function update_item!(
-    query::GenericPasswordItem,
-    attributes::GenericPasswordItem;
-    secret::Union{Nothing, IO, AbstractVector{UInt8}, AbstractString} = nothing,
-)
-    update = _update_pairs(attributes)
-    if secret !== nothing
-        _with_secret_bytes(secret) do bytes
-            _sec_item_update(pairs(query), [update..., :kSecValueData => bytes])
-        end
-    else
-        _sec_item_update(pairs(query), update)
-    end
-    return nothing
-end
-
-function delete_item!(item::GenericPasswordItem)
-    _sec_item_delete(pairs(item))
-    return nothing
 end
 
 end # @static if Sys.isapple()

@@ -3,6 +3,7 @@ module KeychainServices
 using Dates
 
 export AbstractKeychainItem,
+       keychain_target,
        GenericPasswordItem,
        KeychainTarget,
        DataProtectionKeychain,
@@ -27,11 +28,27 @@ export AbstractKeychainItem,
 """
     AbstractKeychainItem
 
-Abstract supertype for all keychain items. Concrete subtypes implement
-`Base.pairs` to yield `(Symbol, Any)` attribute pairs that are marshalled into
-Core Foundation dictionaries for use with the Security.framework SecItem API.
+Abstract supertype for all keychain items. Concrete subtypes must implement:
+
+- `Base.pairs(item)` — returns `(Symbol, Any)` pairs (including `kSecClass` and
+  keychain-target entries) marshalled into a Core Foundation dictionary for
+  Security.framework SecItem calls.
+- `_update_pairs(item)` — returns the mutable attribute pairs only, with no
+  `kSecClass` and no keychain-target keys, suitable for the `attributes`
+  argument of `SecItemUpdate`.
+- `_parse_item_result(attrs::Ptr{Cvoid}, fallback::T)` — deserializes a CF
+  attribute dictionary returned by `SecItemCopyMatching` back into a `T`,
+  falling back to `fallback` field values when an attribute is absent.
 """
 abstract type AbstractKeychainItem end
+
+"""
+    keychain_target(item::AbstractKeychainItem) -> KeychainTarget
+
+Returns the [`KeychainTarget`](@ref) for `item`. Defaults to [`LoginKeychain()`](@ref).
+Subtypes that support multiple keychain backends should override this.
+"""
+keychain_target(::AbstractKeychainItem) = LoginKeychain()
 
 # ── Error types ────────────────────────────────────────────────────────────────
 
