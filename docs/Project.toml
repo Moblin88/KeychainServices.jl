@@ -2,9 +2,6 @@
 Documenter        = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 KeychainServices  = "2f89db48-6337-4944-a5a6-9bc2663dd83d"
 
-[sources]
-KeychainServices = {path = ".."}
-
 [compat]
 Documenter = "1"
 julia      = "1.12"
