@@ -73,7 +73,7 @@ add_item!(item, secret)
 
 ## Design
 
-The low-level [`_cf_dict`](@ref KeychainServices._cf_dict) builder accepts any iterable of
+The low-level `_cf_dict` builder accepts any iterable of
 `(Symbol, Any)` pairs and marshals Julia values into CF objects through `_cf_dict_set!`
 method dispatch:
 

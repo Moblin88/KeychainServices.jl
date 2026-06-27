@@ -31,6 +31,7 @@ add_item!
 copy_matching
 update_item!
 delete_item!
+Base.pairs(::KeychainServices.GenericPasswordItem)
 ```
 
 ## Entitlement probe
