@@ -66,6 +66,12 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
         @test_throws KeychainOperationError pairs(bad)
     end
 
+    @testset "AccessControlItem — unsupported accessible value" begin
+        ctrl = AccessControlItem(:kSecAttrBogus, AccessControlFlags.BiometryAny)
+        item = GenericPasswordItem(service="svc", account="acct", access_control=ctrl)
+        @test_throws KeychainOperationError pairs(item)
+    end
+
     @testset "pairs protocol — LoginKeychain (default)" begin
         item  = GenericPasswordItem(service="svc", account="acct", label="lbl")
         attrs = Dict(pairs(item))
@@ -147,6 +153,13 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
             @test s == secret
             Base.shred!(s)
 
+            # copy_secret with explicit `into` IO
+            buf = Base.SecretBuffer()
+            copy_secret(item; into=buf)
+            seekstart(buf); seekstart(secret)
+            @test buf == secret
+            Base.shred!(buf)
+
             results = search_items(item)
             @test length(results) == 1
             r = results[1]
@@ -155,7 +168,12 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
             @test r.created_at === nothing || r.created_at isa DateTime
             @test r.updated_at === nothing || r.updated_at isa DateTime
 
-            update_item!(item, GenericPasswordItem(label="Updated label"); secret=rotated)
+            # update_item! without secret rotation (attributes only)
+            update_item!(item, GenericPasswordItem(label="Updated label"))
+            results2 = search_items(item)
+            @test results2[1].label == "Updated label"
+
+            update_item!(item, GenericPasswordItem(label="Rotated label"); secret=rotated)
 
             s3 = copy_secret(item)
             seekstart(rotated)
@@ -163,13 +181,34 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
             Base.shred!(s3)
 
             results3 = search_items(item)
-            @test results3[1].label == "Updated label"
+            @test results3[1].label == "Rotated label"
 
             delete_item!(item)
             @test_throws KeychainItemNotFoundError copy_secret(item)
             @test search_items(item) == GenericPasswordItem[]
 
             Base.shred!(secret); Base.shred!(rotated)
+        end
+
+        @testset "Login keychain — String and Vector{UInt8} secret inputs" begin
+            service = "KeychainServices.jl.secret-types.$(getpid())"
+            item    = GenericPasswordItem(service=service, account="user")
+
+            # String secret
+            try delete_item!(item) catch e; @test e isa KeychainItemNotFoundError end
+            add_item!(item, "string-secret")
+            s = copy_secret(item)
+            @test read(s) == Vector{UInt8}("string-secret")
+            Base.shred!(s)
+            delete_item!(item)
+
+            # Vector{UInt8} secret
+            raw = Vector{UInt8}("bytes-secret")
+            add_item!(item, raw)
+            s = copy_secret(item)
+            @test read(s) == raw
+            Base.shred!(s)
+            delete_item!(item)
         end
 
         @testset "Login keychain — tri-state synchronizable" begin
