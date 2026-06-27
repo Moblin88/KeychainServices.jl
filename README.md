@@ -36,23 +36,24 @@ Secrets may be passed as a `Base.SecretBuffer` (or any `IO`), an `AbstractVector
 ```julia
 using KeychainServices
 
-secret  = Base.SecretBuffer("s3cr3t")
-rotated = Base.SecretBuffer("n3w-s3cr3t")
-item    = GenericPasswordItem(service="com.example.app", account="alice")
+item = GenericPasswordItem(service="com.example.app", account="alice")
 
-add_item!(item, secret)
+Base.shred!(Base.SecretBuffer("s3cr3t")) do secret
+    add_item!(item, secret)
+end
 
-password = copy_secret(item)   # Base.SecretBuffer, seekstarted and ready to read
-results  = search_items(item)  # Vector{GenericPasswordItem} with metadata + timestamps
-label    = results[1].label
+Base.shred!(copy_secret(item)) do password   # Base.SecretBuffer, seekstarted and ready to read
+    # use password here
+end
 
-update_item!(item, GenericPasswordItem(label="Primary login"); secret=rotated)
+results = search_items(item)  # Vector{GenericPasswordItem} with metadata + timestamps
+label   = results[1].label
+
+Base.shred!(Base.SecretBuffer("n3w-s3cr3t")) do rotated
+    update_item!(item, GenericPasswordItem(label="Primary login"); secret=rotated)
+end
 
 delete_item!(item)
-
-Base.shred!(secret)
-Base.shred!(rotated)
-Base.shred!(password)
 ```
 
 Additional supported generic-password attributes:
@@ -71,22 +72,23 @@ Additional supported generic-password attributes:
 ```julia
 using KeychainServices
 
-secret  = Base.SecretBuffer("s3cr3t")
-rotated = Base.SecretBuffer("n3w-s3cr3t")
-item    = InternetPasswordItem(server="api.example.com", account="alice")
+item = InternetPasswordItem(server="api.example.com", account="alice")
 
-add_item!(item, secret)
+Base.shred!(Base.SecretBuffer("s3cr3t")) do secret
+    add_item!(item, secret)
+end
 
-password = copy_secret(item)   # Base.SecretBuffer, seekstarted and ready to read
-results  = search_items(item)  # Vector{InternetPasswordItem} with metadata + timestamps
+Base.shred!(copy_secret(item)) do password   # Base.SecretBuffer, seekstarted and ready to read
+    # use password here
+end
 
-update_item!(item, InternetPasswordItem(label="Primary API key"); secret=rotated)
+results = search_items(item)  # Vector{InternetPasswordItem} with metadata + timestamps
+
+Base.shred!(Base.SecretBuffer("n3w-s3cr3t")) do rotated
+    update_item!(item, InternetPasswordItem(label="Primary API key"); secret=rotated)
+end
 
 delete_item!(item)
-
-Base.shred!(secret)
-Base.shred!(rotated)
-Base.shred!(password)
 ```
 
 Additional supported internet-password attributes:
