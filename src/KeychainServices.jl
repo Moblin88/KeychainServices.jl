@@ -24,6 +24,13 @@ export AbstractKeychainItem,
 
 # ── Core abstractions ──────────────────────────────────────────────────────────
 
+"""
+    AbstractKeychainItem
+
+Abstract supertype for all keychain items. Concrete subtypes implement
+`Base.pairs` to yield `(Symbol, Any)` attribute pairs that are marshalled into
+Core Foundation dictionaries for use with the Security.framework SecItem API.
+"""
 abstract type AbstractKeychainItem end
 
 """
@@ -43,10 +50,42 @@ end
 
 # ── Error types ────────────────────────────────────────────────────────────────
 
+"""
+    KeychainServicesError
+
+Abstract supertype for all errors thrown by KeychainServices.jl.
+"""
 abstract type KeychainServicesError <: Exception end
+
+"""
+    KeychainOperationError(message)
+
+Thrown when a Security.framework SecItem call returns an unexpected error code.
+`message` includes the operation name and the OSStatus value.
+"""
 struct KeychainOperationError    <: KeychainServicesError; message::String; end
+
+"""
+    UnsupportedPlatformError(platform, message)
+
+Thrown when a KeychainServices function is called on a non-Apple platform.
+"""
 struct UnsupportedPlatformError  <: KeychainServicesError; platform::Symbol; message::String; end
+
+"""
+    KeychainItemNotFoundError(message)
+
+Thrown by [`copy_matching`](@ref) or [`delete_item!`](@ref) when no keychain
+item matches the query.
+"""
 struct KeychainItemNotFoundError <: KeychainServicesError; message::String; end
+
+"""
+    KeychainPermissionError(message)
+
+Thrown when a SecItem operation fails due to a missing entitlement or access
+denial (e.g., `errSecMissingEntitlement`, `errSecAuthFailed`).
+"""
 struct KeychainPermissionError   <: KeychainServicesError; message::String; end
 
 Base.showerror(io::IO, e::KeychainOperationError)    = print(io, e.message)
