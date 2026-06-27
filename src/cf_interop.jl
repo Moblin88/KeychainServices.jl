@@ -436,10 +436,11 @@ end
 
 function update_item!(
     query::AbstractKeychainItem,
-    attributes::AbstractKeychainItem;
+    attributes::Union{Nothing, AbstractKeychainItem} = nothing,
     secret::Union{Nothing, IO, AbstractVector{UInt8}, AbstractString} = nothing,
 )
-    update = filter(p -> p.first !== :kSecClass, pairs(attributes))
+    attributes === nothing && secret === nothing && return nothing
+    update = attributes === nothing ? Pair{Symbol,Any}[] : filter(p -> p.first !== :kSecClass, pairs(attributes))
     if secret !== nothing
         _with_secret_bytes(secret) do bytes
             _sec_item_update(pairs(query), [update..., :kSecValueData => bytes], keychain_target(query))

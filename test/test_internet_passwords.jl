@@ -111,7 +111,7 @@ end
             results2 = search_items(item)
             @test results2[1].label == "Updated label"
 
-            update_item!(item, InternetPasswordItem(label="Rotated label"); secret=rotated)
+            update_item!(item, InternetPasswordItem(label="Rotated label"), rotated)
 
             Base.shred!(copy_secret(item)) do s3
                 seekstart(rotated)

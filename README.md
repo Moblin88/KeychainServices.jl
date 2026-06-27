@@ -56,7 +56,7 @@ results = search_items(item)  # Vector{GenericPasswordItem} with metadata + time
 label   = results[1].label
 
 Base.shred!(Base.getpass("Enter new password")) do rotated
-    update_item!(item, GenericPasswordItem(label="Primary login"); secret=rotated)
+    update_item!(item, GenericPasswordItem(label="Primary login"), rotated)
 end
 
 delete_item!(item)
@@ -97,7 +97,7 @@ end
 results = search_items(item)  # Vector{InternetPasswordItem} with metadata + timestamps
 
 Base.shred!(Base.getpass("Enter new password")) do rotated
-    update_item!(item, InternetPasswordItem(label="Primary API key"); secret=rotated)
+    update_item!(item, InternetPasswordItem(label="Primary API key"), rotated)
 end
 
 delete_item!(item)

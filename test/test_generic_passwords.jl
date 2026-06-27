@@ -119,7 +119,7 @@ end
             results2 = search_items(item)
             @test results2[1].label == "Updated label"
 
-            update_item!(item, GenericPasswordItem(label="Rotated label"); secret=rotated)
+            update_item!(item, GenericPasswordItem(label="Rotated label"), rotated)
 
             Base.shred!(copy_secret(item)) do s3
                 seekstart(rotated)
@@ -232,7 +232,7 @@ end
                 results = search_items(item)
                 @test results[1].service == service
 
-                update_item!(item, GenericPasswordItem(label="DP label"); secret=rotated)
+                update_item!(item, GenericPasswordItem(label="DP label"), rotated)
 
                 Base.shred!(copy_secret(item)) do s2
                     seekstart(rotated)
@@ -317,7 +317,7 @@ end
                     results = search_items(item)
                     @test results[1].service == service
 
-                    update_item!(item, GenericPasswordItem(label="File KC label"); secret=rotated)
+                    update_item!(item, GenericPasswordItem(label="File KC label"), rotated)
 
                     Base.shred!(copy_secret(item)) do s2
                         seekstart(rotated)

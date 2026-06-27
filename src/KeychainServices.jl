@@ -152,11 +152,15 @@ Throws [`KeychainItemNotFoundError`](@ref) if no item matches.
 function copy_secret end
 
 """
-    update_item!(query::AbstractKeychainItem, attributes::AbstractKeychainItem; secret=nothing)
+    update_item!(query::AbstractKeychainItem,
+                 attributes::AbstractKeychainItem = nothing,
+                 secret = nothing)
 
 Update an existing keychain item. `query` selects the item; non-`nothing` fields of
 `attributes` are applied as changes. Pass `secret` (`IO`, `AbstractVector{UInt8}`, or
-`AbstractString`) to rotate the password — bytes are used and any temporary copy is zeroed.
+`AbstractString`) as the third positional argument to rotate the password — bytes are
+used and any temporary copy is zeroed. Both `attributes` and `secret` are optional;
+omitting both is a no-op.
 """
 function update_item! end
 
@@ -193,7 +197,7 @@ else
     add_item!(::AbstractKeychainItem, ::Union{IO, AbstractVector{UInt8}, AbstractString}) = _unsupported()
     search_items(::AbstractKeychainItem)                                                  = _unsupported()
     copy_secret(::AbstractKeychainItem; kwargs...)                                        = _unsupported()
-    update_item!(::AbstractKeychainItem, ::AbstractKeychainItem; kwargs...)               = _unsupported()
+    update_item!(::AbstractKeychainItem, ::Union{Nothing,AbstractKeychainItem}=nothing, ::Union{Nothing,IO,AbstractVector{UInt8},AbstractString}=nothing) = _unsupported()
     delete_item!(::AbstractKeychainItem)                                                  = _unsupported()
     probe_data_protection_entitlement()                                                   = _unsupported()
 end

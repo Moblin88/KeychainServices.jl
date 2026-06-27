@@ -37,7 +37,7 @@ results  = search_items(item)        # Vector{GenericPasswordItem} with all meta
 label    = results[1].label
 created  = results[1].created_at
 
-update_item!(item, GenericPasswordItem(label="Primary login"); secret=rotated)
+update_item!(item, GenericPasswordItem(label="Primary login"), rotated)
 delete_item!(item)
 
 Base.shred!(secret)
