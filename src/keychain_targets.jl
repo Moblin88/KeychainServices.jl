@@ -4,8 +4,8 @@
 Abstract type for specifying which keychain an item is stored in or queried from.
 
 Concrete subtypes:
-- [`DataProtectionKeychain`](@ref) — modern iOS-style Data Protection keychain (default)
-- [`LoginKeychain`](@ref) — the user's legacy login keychain
+- [`LoginKeychain`](@ref) — the user's legacy login keychain *(default)*
+- [`DataProtectionKeychain`](@ref) — modern iOS-style Data Protection keychain
 - [`FileKeychain`](@ref) — an explicit legacy keychain file
 """
 abstract type KeychainTarget end

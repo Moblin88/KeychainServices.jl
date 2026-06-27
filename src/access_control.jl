@@ -50,6 +50,8 @@ and stored under `kSecAttrAccessControl`.
 | `:kSecAttrAccessibleWhenUnlocked`                  | While unlocked |
 | `:kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`| After first unlock; device-only |
 | `:kSecAttrAccessibleAfterFirstUnlock`              | After first unlock |
+| `:kSecAttrAccessibleAlwaysThisDeviceOnly`          | Always; device-only (deprecated by Apple) |
+| `:kSecAttrAccessibleAlways`                        | Always (deprecated by Apple) |
 
 `flags` is a bitwise combination of [`AccessControlFlags`](@ref) constants.
 

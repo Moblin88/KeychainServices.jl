@@ -268,11 +268,11 @@ function _cfstring_to_string(cfstr::Ptr{Cvoid})
     # Slow path: CFStringGetCStringPtr may return NULL for some encodings.
     len = @ccall CFStringGetLength(cfstr::Ptr{Cvoid})::Int64
     buf = Vector{UInt8}(undef, len * 4 + 1)
-    ok = @ccall CFStringGetCString(
+    ok = GC.@preserve buf @ccall CFStringGetCString(
         cfstr::Ptr{Cvoid}, pointer(buf)::Ptr{Cuchar}, Int64(length(buf))::Int64, UInt32(4)::UInt32
     )::Bool
     ok || return nothing
-    return unsafe_string(pointer(buf))
+    return GC.@preserve buf unsafe_string(pointer(buf))
 end
 
 function _cfboolean_to_bool(cfbool::Ptr{Cvoid})
@@ -291,10 +291,12 @@ end
 
 function _cfdata_to_bytes(cfdata::Ptr{Cvoid})
     cfdata == C_NULL && return nothing
-    len  = @ccall CFDataGetLength(cfdata::Ptr{Cvoid})::Int64
+    len       = @ccall CFDataGetLength(cfdata::Ptr{Cvoid})::Int64
     bytes_ptr = @ccall CFDataGetBytePtr(cfdata::Ptr{Cvoid})::Ptr{Cuchar}
     out = Vector{UInt8}(undef, Int(len))
-    len > 0 && unsafe_copyto!(pointer(out), Ptr{UInt8}(bytes_ptr), Int(len))
+    GC.@preserve out begin
+        len > 0 && unsafe_copyto!(pointer(out), Ptr{UInt8}(bytes_ptr), Int(len))
+    end
     return out
 end
 
@@ -303,7 +305,9 @@ function _cfdata_write_io(cfdata::Ptr{Cvoid}, io::IO)
     bytes_ptr = @ccall CFDataGetBytePtr(cfdata::Ptr{Cvoid})::Ptr{Cuchar}
     buf = Vector{UInt8}(undef, Int(len))
     try
-        len > 0 && unsafe_copyto!(pointer(buf), Ptr{UInt8}(bytes_ptr), Int(len))
+        GC.@preserve buf begin
+            len > 0 && unsafe_copyto!(pointer(buf), Ptr{UInt8}(bytes_ptr), Int(len))
+        end
         write(io, buf)
     finally
         Base.securezero!(buf)

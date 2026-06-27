@@ -225,11 +225,13 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
 
                 add_item!(item, secret)
                 r = copy_matching(item; return_data=true, return_attributes=true)
+                seekstart(secret)
                 @test r.secret == secret
                 @test r.item.service == service
 
                 update_item!(item, GenericPasswordItem(label="DP label"); secret=rotated)
                 r2 = copy_matching(item; return_data=true, return_attributes=true)
+                seekstart(rotated)
                 @test r2.secret     == rotated
                 @test r2.item.label == "DP label"
 

@@ -38,11 +38,11 @@ abstract type AbstractKeychainItem end
 
 Return value from [`copy_matching`](@ref). Carries the matched `item` (populated
 from keychain attributes when `return_attributes=true`), an optional `secret`
-(an `IO` object positioned at the start of the secret bytes when `return_data=true`),
-and optional `created_at` / `updated_at` timestamps.
+(`IO` when `return_data=true`), and optional `created_at` / `updated_at` timestamps.
 
 When no `secret_output` is passed to `copy_matching`, `secret` is a
-`Base.SecretBuffer` already rewound to position 0 and ready to read.
+`Base.SecretBuffer` seekstarted to position 0 and ready to read. When you supply
+your own `secret_output`, it is returned as-is with position left after the write.
 """
 Base.@kwdef struct KeychainItemResult{T<:AbstractKeychainItem}
     item::T

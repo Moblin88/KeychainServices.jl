@@ -36,7 +36,7 @@ item = GenericPasswordItem(service="com.example.app", account="alice")
 add_item!(item, secret)
 
 result = copy_matching(item; return_data=true, return_attributes=true)
-password = result.secret
+password = result.secret  # Base.SecretBuffer, seekstarted and ready to read
 label = result.item.label
 
 update_item!(item, GenericPasswordItem(label="Primary login"); secret=rotated_secret)
@@ -50,7 +50,11 @@ Base.shred!(password)
 
 Fields left as `nothing` are omitted from the underlying Security.framework query dictionary.
 
-Secrets must be provided as `Base.SecretBuffer` values. `copy_matching` also returns secrets as `Base.SecretBuffer`, which lets callers shred them explicitly after use. Converting secrets back into `String` defeats that memory-handling benefit.
+Secrets may be passed as a `Base.SecretBuffer` (or any `IO`), an
+`AbstractVector{UInt8}`, or an `AbstractString`. `copy_matching` returns the
+secret as an `IO` object — a `Base.SecretBuffer` seekstarted to position 0 when
+no `secret_output` is supplied, or your own `IO` with position left after the
+write when you provide one.
 
 Optional field configuration:
 
