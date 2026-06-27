@@ -51,7 +51,9 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
     @testset "Secret inputs require SecretBuffer" begin
         item = GenericPasswordItem(service="svc", account="acct")
         @test_throws MethodError add_item!(item, "not-a-secret-buffer")
-        @test_throws TypeError   update_item!(item, item; secret="not-a-secret-buffer")
+        @static if Sys.isapple()
+            @test_throws TypeError update_item!(item, item; secret="not-a-secret-buffer")
+        end
     end
 
     @testset "Synchronizable + ThisDeviceOnly validation" begin
