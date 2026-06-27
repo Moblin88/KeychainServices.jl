@@ -24,7 +24,7 @@ is_apple = Sys.isapple()
 
 ## API
 
-Direct-item API:
+Direct-item API (targets the login keychain by default — no entitlements required):
 
 ```julia
 using KeychainServices
@@ -80,7 +80,14 @@ Additional supported generic-password attributes:
 - `is_invisible`
 - `is_negative`
 - `generic_data` (`Vector{UInt8}`)
-- `access_control` (`AccessControlItem`, for hardware-backed / biometry-protected items)
+- `access_control` (`AccessControlItem`, for hardware-backed / biometry-protected items — requires a signed app bundle, see below)
+
+> **Note:** `DataProtectionKeychain()` and `AccessControlItem` require the process to be
+> code-signed with the `keychain-access-groups` entitlement. The standard `julia` host is
+> unsigned, so using these from the REPL, scripts, or CI raises `KeychainPermissionError`.
+> Use `LoginKeychain()` (the default) for interactive and scripting contexts. See the
+> [docs](https://Moblin88.github.io/KeychainServices.jl/dev/keychain-types/) for the full
+> signed-app workflow.
 
 Query-time use restrictions for `copy_matching`:
 

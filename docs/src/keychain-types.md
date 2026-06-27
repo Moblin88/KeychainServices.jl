@@ -46,6 +46,19 @@ encryption layer — the same subsystem used on iOS. It is selected by
 setting `kSecUseDataProtectionKeychain = true` in query dictionaries, which
 is exactly what `DataProtectionKeychain()` does.
 
+!!! warning "Not available in the Julia REPL or most scripting contexts"
+    The standard `julia` host process is an unsigned binary. It carries no
+    code-signing entitlements, so **any attempt to use `DataProtectionKeychain()`
+    from a plain Julia session — including the REPL, scripts, and CI runners —
+    will raise `KeychainPermissionError` with `errSecMissingEntitlement`
+    (-34018)**. This is an OS-level restriction, not a library limitation.
+
+    Use `LoginKeychain()` (the default) for interactive and scripting use.
+    `DataProtectionKeychain()` is only usable from a Julia binary compiled with
+    `juliac` and packaged inside a properly signed `.app` bundle. See
+    [Shipping a Julia binary with Data Protection keychain access](@ref shipping)
+    below.
+
 **Characteristics:**
 
 - Items are bound to the device and cannot be extracted directly from the
@@ -92,7 +105,7 @@ end
 
 ---
 
-## Shipping a Julia binary with Data Protection keychain access
+## [Shipping a Julia binary with Data Protection keychain access](@id shipping)
 
 To use `DataProtectionKeychain()` from a compiled Julia application, the
 binary must run inside a properly signed macOS `.app` bundle that carries

@@ -47,6 +47,14 @@ The `keychain` field of [`GenericPasswordItem`](@ref) controls which keychain ba
 | `DataProtectionKeychain()` | Modern Data Protection keychain — adds `kSecUseDataProtectionKeychain=true` |
 | `FileKeychain(path)` | Explicit legacy keychain file |
 
+!!! warning "DataProtectionKeychain requires a signed app bundle"
+    The standard `julia` host is unsigned and carries no entitlements.
+    Using `DataProtectionKeychain()` from the REPL, scripts, or CI will raise
+    `KeychainPermissionError` (`errSecMissingEntitlement`). It is only usable
+    from a `juliac`-compiled binary inside a signed `.app` bundle. See the
+    [Keychain Types & Entitlements](@ref) guide for the full workflow.
+    Use `LoginKeychain()` (the default) in all other contexts.
+
 ```julia
 # Legacy login keychain
 item = GenericPasswordItem(service="com.example.app", account="alice",
@@ -58,6 +66,10 @@ item = GenericPasswordItem(service="com.example.app", account="alice",
 ```
 
 ## Access control (Data Protection keychain)
+
+!!! warning
+    Access control via `AccessControlItem` requires `DataProtectionKeychain()`,
+    which is only available from a signed app bundle. See the warning above.
 
 Use [`AccessControlItem`](@ref) for hardware-backed or biometry-protected items:
 
