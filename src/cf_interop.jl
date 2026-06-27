@@ -120,12 +120,15 @@ function _cf_dict_set!(dict::Ptr{Cvoid}, key::Symbol, value::AccessControlItem)
         error_ref::Ref{Ptr{Cvoid}}
     )::Ptr{Cvoid}
     if acc_ref == C_NULL
-        throw(KeychainOperationError(
-            "SecAccessControlCreateWithFlags failed for $(value.accessible)" *
-            (error_ref[] != C_NULL ? ": " * something(_cfstring_to_string(
-                @ccall CFErrorCopyDescription(error_ref[]::Ptr{Cvoid})::Ptr{Cvoid}
-            ), "unknown error") : "")
-        ))
+        msg = "SecAccessControlCreateWithFlags failed for $(value.accessible)"
+        if error_ref[] != C_NULL
+            desc_cf = @ccall CFErrorCopyDescription(error_ref[]::Ptr{Cvoid})::Ptr{Cvoid}
+            detail = desc_cf != C_NULL ? something(_cfstring_to_string(desc_cf), "unknown error") : "unknown error"
+            desc_cf != C_NULL && @ccall CFRelease(desc_cf::Ptr{Cvoid})::Cvoid
+            @ccall CFRelease(error_ref[]::Ptr{Cvoid})::Cvoid
+            msg *= ": $detail"
+        end
+        throw(KeychainOperationError(msg))
     end
     try
         @ccall CFDictionarySetValue(dict::Ptr{Cvoid}, _sec(key)::Ptr{Cvoid}, acc_ref::Ptr{Cvoid})::Cvoid
@@ -347,10 +350,13 @@ function probe_data_protection_entitlement()::Bool
                 C_NULL::Ptr{Cvoid}, key::Cstring, UInt32(4)::UInt32
             )::Ptr{Cvoid}
             cfkey == C_NULL && continue
-            value = @ccall SecTaskCopyValueForEntitlement(
-                task::Ptr{Cvoid}, cfkey::Ptr{Cvoid}, C_NULL::Ptr{Cvoid}
-            )::Ptr{Cvoid}
-            @ccall CFRelease(cfkey::Ptr{Cvoid})::Cvoid
+            value = try
+                @ccall SecTaskCopyValueForEntitlement(
+                    task::Ptr{Cvoid}, cfkey::Ptr{Cvoid}, C_NULL::Ptr{Cvoid}
+                )::Ptr{Cvoid}
+            finally
+                @ccall CFRelease(cfkey::Ptr{Cvoid})::Cvoid
+            end
             value == C_NULL && continue
             if check_nonempty
                 count = @ccall CFArrayGetCount(value::Ptr{Cvoid})::Int64
