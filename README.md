@@ -126,3 +126,7 @@ Typed errors are exposed for predictable failure handling:
 - `KeychainItemNotFoundError`
 - `KeychainPermissionError`
 - `KeychainOperationError`
+
+## Disclaimer
+
+Portions of this package were developed with the assistance of AI tools (GitHub Copilot). All AI-generated code was reviewed, tested, and modified when appropriate by a human author before being committed. The final implementation reflects human judgment and is the responsibility of the package maintainers.
