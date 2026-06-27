@@ -33,9 +33,6 @@ Abstract supertype for all keychain items. Concrete subtypes must implement:
 - `Base.pairs(item)` — returns `(Symbol, Any)` pairs (including `kSecClass` and
   keychain-target entries) marshalled into a Core Foundation dictionary for
   Security.framework SecItem calls.
-- `_update_pairs(item)` — returns the mutable attribute pairs only, with no
-  `kSecClass` and no keychain-target keys, suitable for the `attributes`
-  argument of `SecItemUpdate`.
 - `_parse_item_result(attrs::Ptr{Cvoid}, fallback::T)` — deserializes a CF
   attribute dictionary returned by `SecItemCopyMatching` back into a `T`,
   falling back to `fallback` field values when an attribute is absent.

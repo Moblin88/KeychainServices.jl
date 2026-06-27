@@ -111,16 +111,16 @@ function Base.pairs(item::GenericPasswordItem)
     _validate_generic_password_item(item)
     attrs = Pair{Symbol,Any}[:kSecClass => :kSecClassGenericPassword]
 
-    item.service      !== nothing && push!(attrs, :kSecAttrService       => item.service)
-    item.account      !== nothing && push!(attrs, :kSecAttrAccount       => item.account)
-    item.label        !== nothing && push!(attrs, :kSecAttrLabel         => item.label)
+    item.service        !== nothing && push!(attrs, :kSecAttrService        => item.service)
+    item.account        !== nothing && push!(attrs, :kSecAttrAccount        => item.account)
+    item.label          !== nothing && push!(attrs, :kSecAttrLabel          => item.label)
     item.synchronizable !== nothing && push!(attrs, :kSecAttrSynchronizable => item.synchronizable)
-    item.access_group !== nothing && push!(attrs, :kSecAttrAccessGroup   => item.access_group)
-    item.description  !== nothing && push!(attrs, :kSecAttrDescription   => item.description)
-    item.comment      !== nothing && push!(attrs, :kSecAttrComment       => item.comment)
-    item.is_invisible !== nothing && push!(attrs, :kSecAttrIsInvisible   => item.is_invisible)
-    item.is_negative  !== nothing && push!(attrs, :kSecAttrIsNegative    => item.is_negative)
-    item.generic_data !== nothing && push!(attrs, :kSecAttrGeneric       => item.generic_data)
+    item.access_group   !== nothing && push!(attrs, :kSecAttrAccessGroup    => item.access_group)
+    item.description    !== nothing && push!(attrs, :kSecAttrDescription    => item.description)
+    item.comment        !== nothing && push!(attrs, :kSecAttrComment        => item.comment)
+    item.is_invisible   !== nothing && push!(attrs, :kSecAttrIsInvisible    => item.is_invisible)
+    item.is_negative    !== nothing && push!(attrs, :kSecAttrIsNegative     => item.is_negative)
+    item.generic_data   !== nothing && push!(attrs, :kSecAttrGeneric        => item.generic_data)
 
     if item.access_control !== nothing
         push!(attrs, :kSecAttrAccessControl => item.access_control)
@@ -131,30 +131,6 @@ function Base.pairs(item::GenericPasswordItem)
     return attrs
 end
 
-# Returns attribute pairs suitable for the `attributes` argument of SecItemUpdate —
-# no kSecClass, no keychain-target keys, only the explicitly-set mutable fields.
-function _update_pairs(item::GenericPasswordItem)
-    attrs = Pair{Symbol,Any}[]
-
-    item.service      !== nothing && push!(attrs, :kSecAttrService       => item.service)
-    item.account      !== nothing && push!(attrs, :kSecAttrAccount       => item.account)
-    item.label        !== nothing && push!(attrs, :kSecAttrLabel         => item.label)
-    item.synchronizable !== nothing && push!(attrs, :kSecAttrSynchronizable => item.synchronizable)
-    item.access_group !== nothing && push!(attrs, :kSecAttrAccessGroup   => item.access_group)
-    item.description  !== nothing && push!(attrs, :kSecAttrDescription   => item.description)
-    item.comment      !== nothing && push!(attrs, :kSecAttrComment       => item.comment)
-    item.is_invisible !== nothing && push!(attrs, :kSecAttrIsInvisible   => item.is_invisible)
-    item.is_negative  !== nothing && push!(attrs, :kSecAttrIsNegative    => item.is_negative)
-    item.generic_data !== nothing && push!(attrs, :kSecAttrGeneric       => item.generic_data)
-
-    if item.access_control !== nothing
-        push!(attrs, :kSecAttrAccessControl => item.access_control)
-    elseif item.accessible !== nothing
-        push!(attrs, :kSecAttrAccessible => item.accessible)
-    end
-
-    return attrs
-end
 
 @static if Sys.isapple()
 

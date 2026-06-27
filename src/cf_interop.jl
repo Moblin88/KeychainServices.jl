@@ -350,7 +350,6 @@ end
 #
 # These work for any AbstractKeychainItem that implements:
 #   • Base.pairs(item)      — full query dict including kSecClass + keychain target
-#   • _update_pairs(item)   — mutable attribute pairs only (no kSecClass, no target keys)
 #   • _parse_item_result(attrs::Ptr{Cvoid}, fallback::T) — deserialize a CF dict back into T
 
 function add_item!(item::AbstractKeychainItem, secret::Union{IO, AbstractVector{UInt8}, AbstractString})
@@ -421,7 +420,7 @@ function update_item!(
     attributes::AbstractKeychainItem;
     secret::Union{Nothing, IO, AbstractVector{UInt8}, AbstractString} = nothing,
 )
-    update = _update_pairs(attributes)
+    update = filter(p -> p.first !== :kSecClass, pairs(attributes))
     if secret !== nothing
         _with_secret_bytes(secret) do bytes
             _sec_item_update(pairs(query), [update..., :kSecValueData => bytes], keychain_target(query))
