@@ -194,24 +194,27 @@ function _parse_copy_matching_result(
     return_data::Bool,
     return_attributes::Bool,
     result::Ptr{Cvoid},
+    secret_io::IO,
 )
     if return_attributes
         item, created_at, updated_at = _parse_generic_password_result(result, query_item)
         secret = if return_data
             data_ptr = _cf_dict_get(result, :kSecValueData)
             data_ptr == C_NULL && throw(KeychainOperationError("kSecReturnData=true but no kSecValueData in result"))
-            _cfdata_to_secretbuffer(data_ptr)
+            _cfdata_write_io(data_ptr, secret_io)
+            secret_io
         else
             nothing
         end
         return KeychainItemResult(item=item, secret=secret, created_at=created_at, updated_at=updated_at)
     elseif return_data
-        return KeychainItemResult(item=query_item, secret=_cfdata_to_secretbuffer(result))
+        _cfdata_write_io(result, secret_io)
+        return KeychainItemResult(item=query_item, secret=secret_io)
     end
     return KeychainItemResult(item=query_item)
 end
 
-function add_item!(item::GenericPasswordItem, secret::IO)
+function add_item!(item::GenericPasswordItem, secret::Union{IO, AbstractVector{UInt8}, AbstractString})
     _with_secret_bytes(secret) do bytes
         _sec_item_add([pairs(item)..., :kSecValueData => bytes])
     end
@@ -222,6 +225,7 @@ function copy_matching(
     item::GenericPasswordItem;
     return_data::Bool           = true,
     return_attributes::Bool     = false,
+    secret_output::Union{Nothing, IO}            = nothing,
     use_authentication_ui::Union{Nothing, Symbol}       = nothing,
     use_operation_prompt::Union{Nothing, AbstractString} = nothing,
 )
@@ -230,6 +234,11 @@ function copy_matching(
             throw(KeychainOperationError("Unsupported kSecUseAuthenticationUI value: $use_authentication_ui"))
     end
 
+    # Resolve the IO target for secret bytes. Auto-create a SecretBuffer when
+    # the caller didn't supply one so we can seekstart it before returning.
+    auto_created = return_data && secret_output === nothing
+    io = auto_created ? Base.SecretBuffer() : (secret_output !== nothing ? secret_output : IOBuffer())
+
     query = Pair{Symbol,Any}[pairs(item)...]
     push!(query, :kSecReturnData       => return_data)
     push!(query, :kSecReturnAttributes => return_attributes)
@@ -237,18 +246,25 @@ function copy_matching(
     use_authentication_ui !== nothing && push!(query, :kSecUseAuthenticationUI => use_authentication_ui)
     use_operation_prompt  !== nothing && push!(query, :kSecUseOperationPrompt  => use_operation_prompt)
 
-    result = _sec_item_copy_matching(query)
     try
-        return _parse_copy_matching_result(item, return_data, return_attributes, result)
-    finally
-        result != C_NULL && @ccall CFRelease(result::Ptr{Cvoid})::Cvoid
+        result = _sec_item_copy_matching(query)
+        try
+            r = _parse_copy_matching_result(item, return_data, return_attributes, result, io)
+            auto_created && r.secret !== nothing && seekstart(r.secret)
+            return r
+        finally
+            result != C_NULL && @ccall CFRelease(result::Ptr{Cvoid})::Cvoid
+        end
+    catch
+        auto_created && Base.shred!(io)
+        rethrow()
     end
 end
 
 function update_item!(
     query::GenericPasswordItem,
     attributes::GenericPasswordItem;
-    secret::Union{Nothing, IO} = nothing,
+    secret::Union{Nothing, IO, AbstractVector{UInt8}, AbstractString} = nothing,
 )
     update = _update_pairs(attributes)
     if secret !== nothing

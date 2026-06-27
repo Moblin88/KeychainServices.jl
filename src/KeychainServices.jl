@@ -38,14 +38,17 @@ abstract type AbstractKeychainItem end
 
 Return value from [`copy_matching`](@ref). Carries the matched `item` (populated
 from keychain attributes when `return_attributes=true`), an optional `secret`
-(`Base.SecretBuffer` when `return_data=true`), and optional `created_at` /
-`updated_at` timestamps.
+(an `IO` object positioned at the start of the secret bytes when `return_data=true`),
+and optional `created_at` / `updated_at` timestamps.
+
+When no `secret_output` is passed to `copy_matching`, `secret` is a
+`Base.SecretBuffer` already rewound to position 0 and ready to read.
 """
 Base.@kwdef struct KeychainItemResult{T<:AbstractKeychainItem}
     item::T
-    secret::Union{Nothing, Base.SecretBuffer} = nothing
-    created_at::Union{Nothing, DateTime}      = nothing
-    updated_at::Union{Nothing, DateTime}      = nothing
+    secret::Union{Nothing, IO}           = nothing
+    created_at::Union{Nothing, DateTime} = nothing
+    updated_at::Union{Nothing, DateTime} = nothing
 end
 
 # ── Error types ────────────────────────────────────────────────────────────────
@@ -102,24 +105,27 @@ include("generic_passwords.jl")
 # ── Public API stubs (for documentation and non-Apple dispatch) ────────────────
 
 """
-    add_item!(item::AbstractKeychainItem, secret::IO)
+    add_item!(item::AbstractKeychainItem, secret)
 
-Store a new keychain item. `secret` is the password data as any `IO` object
-(e.g. `Base.SecretBuffer`, `IOBuffer`). Bytes are read internally into a
-`Vector{UInt8}`, used for the keychain write, then zeroed. The `secret` object
-itself is not modified — callers retain ownership and responsibility for its
-lifetime.
+Store a new keychain item. `secret` may be an `IO` (read from current position),
+an `AbstractVector{UInt8}`, or an `AbstractString`. Bytes are used for the keychain
+write; any temporary copy is zeroed. The original `secret` is not modified — callers
+retain ownership.
 """
 function add_item! end
 
 """
     copy_matching(item::AbstractKeychainItem; return_data=true, return_attributes=false,
+                  secret_output::Union{Nothing,IO}=nothing,
                   use_authentication_ui=nothing, use_operation_prompt=nothing) -> KeychainItemResult
 
 Find a keychain item by matching the non-`nothing` fields of `item`.
 
 - `return_data=true` — include the secret in the result's `secret` field.
 - `return_attributes=true` — populate the result `item` from the keychain metadata.
+- `secret_output` — an `IO` to write the secret bytes into. When `nothing` (the
+  default), a `Base.SecretBuffer` is created automatically and rewound to position 0
+  before being returned in `KeychainItemResult.secret`.
 
 On the Data Protection keychain, `use_authentication_ui` (a `kSecUseAuthenticationUI*`
 symbol) and `use_operation_prompt` (a `String`) control how the system presents
@@ -128,11 +134,11 @@ authentication UI.
 function copy_matching end
 
 """
-    update_item!(query::AbstractKeychainItem, attributes::AbstractKeychainItem; secret::Union{Nothing,IO}=nothing)
+    update_item!(query::AbstractKeychainItem, attributes::AbstractKeychainItem; secret=nothing)
 
 Update an existing keychain item. `query` selects the item; non-`nothing` fields of
-`attributes` are applied as changes. Pass `secret` (any `IO` object) to rotate the
-password — bytes are extracted, used, and zeroed internally.
+`attributes` are applied as changes. Pass `secret` (`IO`, `AbstractVector{UInt8}`, or
+`AbstractString`) to rotate the password — bytes are used and any temporary copy is zeroed.
 """
 function update_item! end
 
@@ -166,7 +172,7 @@ else
         _platform(), "Keychain Services is only available on Apple platforms"
     ))
 
-    add_item!(::AbstractKeychainItem, ::Base.SecretBuffer)             = _unsupported()
+    add_item!(::AbstractKeychainItem, ::Union{IO, AbstractVector{UInt8}, AbstractString}) = _unsupported()
     copy_matching(::AbstractKeychainItem; kwargs...)                   = _unsupported()
     update_item!(::AbstractKeychainItem, ::AbstractKeychainItem; kwargs...) = _unsupported()
     delete_item!(::AbstractKeychainItem)                               = _unsupported()

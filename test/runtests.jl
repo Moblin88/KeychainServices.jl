@@ -48,12 +48,10 @@ data_protection_available() = @static Sys.isapple() ? probe_data_protection_enti
         @test item.keychain isa LoginKeychain
     end
 
-    @testset "Secret inputs require SecretBuffer" begin
+    @testset "Secret inputs — accepted types" begin
         item = GenericPasswordItem(service="svc", account="acct")
-        @test_throws MethodError add_item!(item, "not-a-secret-buffer")
-        @static if Sys.isapple()
-            @test_throws TypeError update_item!(item, item; secret="not-a-secret-buffer")
-        end
+        @test_throws MethodError add_item!(item, 42)
+        @test_throws MethodError add_item!(item, :symbol)
     end
 
     @testset "Synchronizable + ThisDeviceOnly validation" begin

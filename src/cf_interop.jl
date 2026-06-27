@@ -176,16 +176,34 @@ end
 # ── Secret IO helper ───────────────────────────────────────────────────────────
 
 """
-    _with_secret_bytes(f, io::IO, nbytes=nothing)
+    _with_secret_bytes(f, secret)
 
-Read bytes from `io` at its current position — `nbytes` bytes if specified,
-otherwise all remaining — into a `Vector{UInt8}`, call `f(bytes)`, then
-`securezero!` the vector regardless of whether `f` throws. The `io` is not
-rewound or modified beyond the normal read advance; callers retain full
-ownership.
+Extract secret bytes from `secret` and call `f(bytes::AbstractVector{UInt8})`,
+then clean up any temporary allocation.
+
+- `IO`: reads from the current position (`nbytes` bytes or all remaining),
+  calls `f`, then `securezero!`s the temporary copy. The `IO` position
+  advances naturally; no other modifications are made.
+- `AbstractVector{UInt8}`: calls `f` directly with the vector — no copy, no
+  zeroing. Core Foundation makes its own copy; the caller owns the original.
+- `AbstractString`: encodes to `Vector{UInt8}` via `codeunits`, calls `f`,
+  then `securezero!`s the copy.
 """
 function _with_secret_bytes(f, io::IO, nbytes::Union{Int, Nothing} = nothing)
     bytes = nbytes === nothing ? read(io) : read(io, nbytes)
+    try
+        f(bytes)
+    finally
+        Base.securezero!(bytes)
+    end
+end
+
+function _with_secret_bytes(f, v::AbstractVector{UInt8}, ::Union{Int, Nothing} = nothing)
+    f(v)
+end
+
+function _with_secret_bytes(f, s::AbstractString, ::Union{Int, Nothing} = nothing)
+    bytes = Vector{UInt8}(codeunits(s))
     try
         f(bytes)
     finally
@@ -277,16 +295,15 @@ function _cfdata_to_bytes(cfdata::Ptr{Cvoid})
     return out
 end
 
-function _cfdata_to_secretbuffer(cfdata::Ptr{Cvoid})
-    len  = @ccall CFDataGetLength(cfdata::Ptr{Cvoid})::Int64
+function _cfdata_write_io(cfdata::Ptr{Cvoid}, io::IO)
+    len       = @ccall CFDataGetLength(cfdata::Ptr{Cvoid})::Int64
     bytes_ptr = @ccall CFDataGetBytePtr(cfdata::Ptr{Cvoid})::Ptr{Cuchar}
     buf = Vector{UInt8}(undef, Int(len))
     try
         len > 0 && unsafe_copyto!(pointer(buf), Ptr{UInt8}(bytes_ptr), Int(len))
-        return Base.SecretBuffer!(buf)
-    catch
+        write(io, buf)
+    finally
         Base.securezero!(buf)
-        rethrow()
     end
 end
 
