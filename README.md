@@ -38,6 +38,12 @@ using KeychainServices
 
 item = GenericPasswordItem(service="com.example.app", account="alice")
 
+# Prompt the user interactively — no secret ever appears in source code
+Base.shred!(Base.getpass("Enter password")) do secret
+    add_item!(item, secret)
+end
+
+# Or construct the SecretBuffer directly when the value is already in memory
 Base.shred!(Base.SecretBuffer("s3cr3t")) do secret
     add_item!(item, secret)
 end
@@ -49,7 +55,7 @@ end
 results = search_items(item)  # Vector{GenericPasswordItem} with metadata + timestamps
 label   = results[1].label
 
-Base.shred!(Base.SecretBuffer("n3w-s3cr3t")) do rotated
+Base.shred!(Base.getpass("Enter new password")) do rotated
     update_item!(item, GenericPasswordItem(label="Primary login"); secret=rotated)
 end
 
@@ -74,6 +80,12 @@ using KeychainServices
 
 item = InternetPasswordItem(server="api.example.com", account="alice")
 
+# Prompt the user interactively — no secret ever appears in source code
+Base.shred!(Base.getpass("Enter password")) do secret
+    add_item!(item, secret)
+end
+
+# Or construct the SecretBuffer directly when the value is already in memory
 Base.shred!(Base.SecretBuffer("s3cr3t")) do secret
     add_item!(item, secret)
 end
@@ -84,7 +96,7 @@ end
 
 results = search_items(item)  # Vector{InternetPasswordItem} with metadata + timestamps
 
-Base.shred!(Base.SecretBuffer("n3w-s3cr3t")) do rotated
+Base.shred!(Base.getpass("Enter new password")) do rotated
     update_item!(item, InternetPasswordItem(label="Primary API key"); secret=rotated)
 end
 
