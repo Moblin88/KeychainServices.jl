@@ -9,8 +9,9 @@ makedocs(
         prettyurls = get(ENV, "CI", nothing) == "true",
     ),
     pages = [
-        "Home"          => "index.md",
-        "API Reference" => "api.md",
+        "Home"                             => "index.md",
+        "Keychain Types & Entitlements"    => "keychain-types.md",
+        "API Reference"                    => "api.md",
     ],
     warnonly = [:missing_docs],
 )
