@@ -131,7 +131,7 @@ calls into KeychainServices.jl:
 using KeychainServices
 
 function store_credential(service, account, password)
-    secret = Base.SecretBuffer!(collect(codeunits(password)))
+    secret = Base.SecretBuffer(password)
     item   = GenericPasswordItem(service=service, account=account,
                                  keychain=DataProtectionKeychain())
     add_item!(item, secret)

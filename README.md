@@ -29,8 +29,8 @@ Direct-item API (targets the login keychain by default — no entitlements requi
 ```julia
 using KeychainServices
 
-secret = Base.SecretBuffer!(collect(codeunits("s3cr3t")))
-rotated_secret = Base.SecretBuffer!(collect(codeunits("n3w-s3cr3t")))
+secret = Base.SecretBuffer("s3cr3t")
+rotated_secret = Base.SecretBuffer("n3w-s3cr3t")
 item = GenericPasswordItem(service="com.example.app", account="alice")
 
 add_item!(item, secret)
@@ -57,7 +57,7 @@ Optional field configuration:
 ```julia
 using KeychainServices
 
-secret = Base.SecretBuffer!(collect(codeunits("s3cr3t")))
+secret = Base.SecretBuffer("s3cr3t")
 sync_item = GenericPasswordItem(
 	service="com.example.app",
 	account="alice",

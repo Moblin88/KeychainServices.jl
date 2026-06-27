@@ -19,8 +19,8 @@ It calls Security.framework directly through Julia's `@ccall` bindings — no sh
 ```julia
 using KeychainServices
 
-secret  = Base.SecretBuffer!(collect(codeunits("s3cr3t")))
-rotated = Base.SecretBuffer!(collect(codeunits("n3w-s3cr3t")))
+secret  = Base.SecretBuffer("s3cr3t")
+rotated = Base.SecretBuffer("n3w-s3cr3t")
 item    = GenericPasswordItem(service="com.example.app", account="alice")
 
 add_item!(item, secret)

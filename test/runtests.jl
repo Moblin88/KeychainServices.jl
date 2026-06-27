@@ -4,7 +4,7 @@ using Test
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-secret_buf(s::String) = Base.SecretBuffer!(collect(codeunits(s)))
+secret_buf(s::String) = Base.SecretBuffer(s)
 
 # Use the Security C API directly to probe whether the current process holds the
 # entitlements required for Data Protection keychain access.
